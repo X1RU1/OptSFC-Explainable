@@ -1,0 +1,85 @@
+Metadata-Version: 2.4
+Name: optsfc
+Version: 0.1.0
+Summary: Optimal Service Function Chaining Environment and Training Framework
+Author-email: Your Name <your.email@example.com>
+License: MIT
+Project-URL: Homepage, https://github.com/wsoussi/OptSFC
+Project-URL: Repository, https://github.com/wsoussi/OptSFC
+Project-URL: Documentation, https://github.com/wsoussi/OptSFC
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Developers
+Classifier: Intended Audience :: Science/Research
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Topic :: Scientific/Engineering :: Artificial Intelligence
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+Requires-Dist: gym==0.26.2
+Requires-Dist: gymnasium==1.0.0
+Requires-Dist: matplotlib==3.8.2
+Requires-Dist: numpy==1.26.4
+Requires-Dist: scipy==1.11.0
+Requires-Dist: stable-baselines3==2.5.0a0
+Requires-Dist: torch==2.5.1
+Requires-Dist: sb3-contrib==2.2.1
+Requires-Dist: morl-baselines==1.1.0
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0; extra == "dev"
+Requires-Dist: pytest-cov; extra == "dev"
+Requires-Dist: black; extra == "dev"
+Requires-Dist: isort; extra == "dev"
+Requires-Dist: mypy; extra == "dev"
+
+# OptSFC: Optimal Service Function Chaining
+
+OptSFC is a multi-objective reinforcement learning environment and training framework for optimal service function chaining in 5G networks.
+
+## Features
+
+- Multi-objective 5G network environment (MOfiveG_net)
+- Support for various RL algorithms (PPO, A2C, MaskablePPO)
+- Multi-objective RL training with EUPG and Envelope algorithms
+- Comprehensive evaluation and visualization tools
+
+## Installation
+
+```bash
+pip install -e .
+```
+
+## Quick Start
+
+```python
+from optsfc import MOfiveG_net, train_eupg
+
+# Create environment
+env = MOfiveG_net("MlpPolicy", budget_reset="episodic")
+
+# Train EUPG agent
+train_eupg(
+    total_timesteps=100000,
+    model_name="eupg_model", 
+    budget_reset="episodic"
+)
+```
+
+## Package Structure
+
+- `optsfc.envs.mo_fiveg_mdp`: Core environment implementation
+- `optsfc.envs.morl_train`: Training utilities for MORL algorithms  
+- `optsfc.envs.short_simulated_testbed`: Testing and validation utilities
+- `optsfc.envs.short_space_dict`: Environment space definitions
+
+## Dependencies
+
+- gymnasium/gym: Environment interface
+- stable-baselines3: RL algorithms
+- sb3-contrib: Additional RL algorithms
+- morl-baselines: Multi-objective RL algorithms
+- torch: Deep learning framework
+- numpy, matplotlib, scipy: Scientific computing

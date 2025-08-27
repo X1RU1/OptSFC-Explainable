@@ -1,0 +1,16 @@
+gym==0.26.2
+gymnasium==1.0.0
+matplotlib==3.8.2
+numpy==1.26.4
+scipy==1.11.0
+stable-baselines3==2.5.0a0
+torch==2.5.1
+sb3-contrib==2.2.1
+morl-baselines==1.1.0
+
+[dev]
+pytest>=7.0
+pytest-cov
+black
+isort
+mypy

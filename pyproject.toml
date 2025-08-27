@@ -1,0 +1,61 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "optsfc"
+version = "0.1.0"
+description = "Optimal Service Function Chaining Environment and Training Framework"
+authors = [
+    {name = "Your Name", email = "your.email@example.com"}
+]
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+    "gym==0.26.2",
+    "gymnasium==1.0.0",
+    "matplotlib==3.8.2",
+    "numpy==1.26.4",
+    "scipy==1.11.0",
+    "stable-baselines3==2.5.0a0",
+    "torch==2.5.1",
+    "sb3-contrib==2.2.1",
+    "morl-baselines==1.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov",
+    "black",
+    "isort",
+    "mypy",
+]
+
+[project.urls]
+Homepage = "https://github.com/wsoussi/OptSFC"
+Repository = "https://github.com/wsoussi/OptSFC"
+Documentation = "https://github.com/wsoussi/OptSFC"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["optsfc*"]
+
+[tool.black]
+line-length = 100
+target-version = ['py310']
+
+[tool.isort]
+profile = "black"
+line_length = 100
