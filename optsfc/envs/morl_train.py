@@ -2,6 +2,7 @@ import os
 os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
 
 import numpy as np
+import torch
 import json
 import random
 from types import SimpleNamespace
@@ -414,8 +415,12 @@ def train_Envelope(total_timesteps, model_name, budget_reset="episodic", gamma=0
 
     # Train the agent
     agent = Envelope(env, learning_rate=lr, gamma=gamma, initial_epsilon=epsilon, final_epsilon=epsilon, batch_size=batch_size, net_arch=net_arch, log = False)
+    
+    env.model_for_explain = agent
+
     agent.train(total_timesteps= total_timesteps, eval_freq=1000)
     agent.save(save_dir=save_dir, filename=filename, save_replay_buffer= save_replay_buffer)
+    return env
 
 
 def split_train_Envelope(total_timesteps, timesteps_split, model_name, budget_reset="episodic", gamma=0.99, lr=3e-4, epsilon=0.01, batch_size=256, net_arch=[256, 256, 256, 256]):

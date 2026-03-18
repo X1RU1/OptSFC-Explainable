@@ -3,6 +3,7 @@ import os
 os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
 import math
 import gc
+import torch
 import numpy as np
 import matplotlib.pyplot as plt
 import time
@@ -42,6 +43,134 @@ def scalarization(reward: np.ndarray, weights= None) -> float:
         res = float(sum(reward[:, 0] * rewards_coeff[0] + reward[:, 1] * rewards_coeff[1] + reward[:, 2] * rewards_coeff[2]))
         print("res", res)
         return res
+
+
+def get_q_values_from_model(model, obs, weights=None):
+    try:
+        obs_np = np.array(obs, dtype=np.float32)
+        if obs_np.ndim == 1:
+            obs_np = obs_np[None, :]  # batch dim
+
+        # ===== MORL Envelope =====
+        if hasattr(model, "q_net"):
+            if weights is None:
+                raise ValueError("Envelope q_net requires weights 'w' for forward pass")
+
+            w_tensor = torch.tensor(np.array(weights, dtype=np.float32), dtype=torch.float32)
+            if w_tensor.ndim == 1:
+                w_tensor = w_tensor.unsqueeze(0)  # shape (1, 3) for batch multiplication
+
+            obs_tensor = torch.tensor(obs_np, dtype=torch.float32)
+            with torch.no_grad():
+                q_values = model.q_net(obs_tensor, w_tensor)
+                q_values = q_values.cpu().numpy()
+
+            # Remove batch dimension: (1, n_actions, 3) → (n_actions, 3)
+            if q_values.ndim == 3:
+                q_values = q_values.squeeze(0)
+
+            # print("✅ Envelope Q-values obtained:", q_values)
+            return q_values
+
+        # ===== SB3 DQN-like =====
+        elif hasattr(model, "policy") and hasattr(model.policy, "q_net"):
+            obs_tensor = torch.tensor(obs_np, dtype=torch.float32)
+            with torch.no_grad():
+                q_values = model.policy.q_net(obs_tensor).cpu().numpy()
+            # print("✅ SB3 Q-values obtained:", q_values)
+            return q_values.squeeze()
+
+        else:
+            raise TypeError("Model type not supported for explanation")
+
+    except Exception as e:
+        print("❌ get_q_values_from_model failed:", e)
+        raise
+
+
+def reward_difference_explanation(model, obs, weights=None, top_k=2):
+    q_values = get_q_values_from_model(model, obs, weights)
+
+    # ===== MORL CASE =====
+    if q_values.ndim == 2:
+        if weights is None:
+            raise ValueError("Weights required for MORL explanation")
+
+        weights = np.array(weights)
+
+        # scalarized Q
+        scalar_q = q_values @ weights
+
+        # best vs alternative
+        best_action = int(np.argmax(scalar_q))
+        sorted_idx = np.argsort(scalar_q)
+        alt_action = int(sorted_idx[-top_k])
+
+        best_q = q_values[best_action]
+        alt_q = q_values[alt_action]
+
+        delta = best_q - alt_q
+
+        names = ["Resource", "Network", "Security"]
+
+        # Comparison 
+        explanation_lines = []
+        main_reason = None
+        max_contrib = -np.inf
+
+        for i, name in enumerate(names):
+            diff = delta[i]
+
+            if diff > 0:
+                explanation_lines.append(
+                    f"{name} improved by {diff:.3f}"
+                )
+                if diff > max_contrib:
+                    max_contrib = diff
+                    main_reason = name
+            else:
+                explanation_lines.append(
+                    f"{name} decreased by {abs(diff):.3f}"
+                )
+
+        summary = (
+            f"Action {best_action} was chosen over action {alt_action} "
+            f"mainly due to better {main_reason}, "
+            f"with overall advantage {np.dot(delta, weights):.3f}"
+        )
+
+        return {
+            "type": "MORL",
+            "best_action": best_action,
+            "alternative_action": alt_action,
+            "best_q_vector": best_q,
+            "alt_q_vector": alt_q,
+            "delta_vector": delta,
+            "summary": summary,
+            "details": explanation_lines
+        }
+
+    # ===== SINGLE OBJECTIVE =====
+    else:
+        best_action = int(np.argmax(q_values))
+        sorted_idx = np.argsort(q_values)
+        alt_action = int(sorted_idx[-top_k])
+
+        delta = q_values[best_action] - q_values[alt_action]
+
+        summary = (
+            f"Action {best_action} chosen over {alt_action} "
+            f"with Q advantage {delta:.3f}"
+        )
+
+        return {
+            "type": "SingleObjective",
+            "best_action": best_action,
+            "alternative_action": alt_action,
+            "delta": float(delta),
+            "summary": summary
+        }
+
 
 def dict_observation_to_array(observation):
     # Convert the dictionary observation into a numpy array
@@ -174,6 +303,8 @@ class MOfiveG_net(gym.Env):
         :param rewards_coeff: if non_MORL is True, this is the reward coefficients for the three objectives
         :param num_envs: default is 1
         """
+        self.explain_log = []
+
         self.recon_schedule = [sigmoid_schedule(t=t, p_start=0.01, p_end=1, T=self.recon_T) for t in range(self.recon_T)]
         # change these parameters based on wether they are weekly or daily
         if budget_reset == "weekly":
@@ -247,6 +378,11 @@ class MOfiveG_net(gym.Env):
             return dict_observation_to_image(self.observation), {}
         else:# "Mlp" or "MORL"
             return dict_observation_to_array(self.observation), {}
+    
+    def save_explanations(self, filename="explanations.csv"):
+        import pandas as pd
+        df = pd.DataFrame(self.explain_log)
+        df.to_csv(filename, index=False)
 
     def step(self, action):
         info = {}
@@ -346,6 +482,29 @@ class MOfiveG_net(gym.Env):
 
         info["rew"] = final_reward
         self.observation = update_agent_obs(self.environment, self.observation)
+
+        # === Explainability ===   
+        if getattr(self, "model_for_explain", None) is not None:
+            try:
+                explanation = reward_difference_explanation(
+                    self.model_for_explain,
+                    dict_observation_to_array(self.observation),
+                    weights=self.rewards_coeff
+                )
+                info["explanation"] = explanation
+
+                self.explain_log.append({
+                    "step": self.step_counter,
+                    "best_action": explanation["best_action"],
+                    "alt_action": explanation["alternative_action"],
+                    "summary": explanation["summary"],
+                    "resource_diff": explanation["delta_vector"][0],
+                    "network_diff": explanation["delta_vector"][1],
+                    "security_diff": explanation["delta_vector"][2],
+                })
+            except Exception as e:
+                info["explanation_error"] = str(e)
+
         if self.non_MORL:
             if self.policy.startswith("Cnn"):
                 return dict_observation_to_image(self.observation), final_reward, done, truncated, info
