@@ -420,6 +420,13 @@ def train_Envelope(total_timesteps, model_name, budget_reset="episodic", gamma=0
 
     agent.train(total_timesteps= total_timesteps, eval_freq=1000)
     agent.save(save_dir=save_dir, filename=filename, save_replay_buffer= save_replay_buffer)
+
+    if env.explain_log:
+        import pandas as pd
+        df_log = pd.DataFrame(env.explain_log)
+        match_rate = df_log["match"].mean() * 100
+        print(f"Explanation match rate: {match_rate:.1f}%")
+        print(f"   Matched: {df_log['match'].sum()} / {len(df_log)}")
     return env
 
 

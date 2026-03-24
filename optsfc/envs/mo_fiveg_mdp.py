@@ -107,36 +107,36 @@ def reward_difference_explanation(model, obs, weights=None, top_k=2):
         alt_action = int(sorted_idx[-top_k])
 
         best_q = q_values[best_action]
-        alt_q = q_values[alt_action]
-
-        delta = best_q - alt_q
+        alt_q  = q_values[alt_action]
+        delta  = best_q - alt_q
 
         names = ["Resource", "Network", "Security"]
 
-        # Comparison 
         explanation_lines = []
         main_reason = None
         max_contrib = -np.inf
 
         for i, name in enumerate(names):
-            diff = delta[i]
-
+            diff          = delta[i]
+            weighted_diff = diff * weights[i]
             if diff > 0:
                 explanation_lines.append(
-                    f"{name} improved by {diff:.3f}"
+                    f"{name} improved by {diff:.3f} (weighted: {weighted_diff:.3f})"
                 )
-                if diff > max_contrib:
-                    max_contrib = diff
+                if weighted_diff > max_contrib:
+                    max_contrib = weighted_diff
                     main_reason = name
             else:
                 explanation_lines.append(
-                    f"{name} decreased by {abs(diff):.3f}"
+                    f"{name} decreased by {abs(diff):.3f} (weighted: {weighted_diff:.3f})"
                 )
+
+        overall_advantage = float(np.dot(delta, weights))
 
         summary = (
             f"Action {best_action} was chosen over action {alt_action} "
             f"mainly due to better {main_reason}, "
-            f"with overall advantage {np.dot(delta, weights):.3f}"
+            f"with overall advantage {overall_advantage:.3f}"
         )
 
         return {
@@ -145,22 +145,31 @@ def reward_difference_explanation(model, obs, weights=None, top_k=2):
             "alternative_action": alt_action,
             "best_q_vector": best_q,
             "alt_q_vector": alt_q,
+            "best_weighted_q": best_q * weights,
+            "alt_weighted_q": alt_q  * weights,
             "delta_vector": delta,
+            "weighted_delta": delta * weights,
             "summary": summary,
             "details": explanation_lines
         }
 
     # ===== SINGLE OBJECTIVE =====
     else:
-        best_action = int(np.argmax(q_values))
-        sorted_idx = np.argsort(q_values)
-        alt_action = int(sorted_idx[-top_k])
+        if weights is not None:
+            w = float(weights) if np.isscalar(weights) else float(weights[0])
+        else:
+            w = 1.0
 
-        delta = q_values[best_action] - q_values[alt_action]
+        best_action = int(np.argmax(q_values))
+        sorted_idx  = np.argsort(q_values)
+        alt_action  = int(sorted_idx[-top_k])
+
+        delta          = q_values[best_action] - q_values[alt_action]
+        weighted_delta = delta * w
 
         summary = (
             f"Action {best_action} chosen over {alt_action} "
-            f"with Q advantage {delta:.3f}"
+            f"with Q advantage {weighted_delta:.3f}"
         )
 
         return {
@@ -168,10 +177,11 @@ def reward_difference_explanation(model, obs, weights=None, top_k=2):
             "best_action": best_action,
             "alternative_action": alt_action,
             "delta": float(delta),
+            "weighted_delta": float(weighted_delta),
             "summary": summary
         }
 
-
+        
 def dict_observation_to_array(observation):
     # Convert the dictionary observation into a numpy array
     obs_array = np.hstack([arr.ravel() for arr in observation.values()])
@@ -388,6 +398,9 @@ class MOfiveG_net(gym.Env):
         info = {}
         # increment steps counter
         self.step_counter += 1
+
+        obs_before_step = dict_observation_to_array(self.observation)
+
         # increment dynamic recon counter for each vnf
         for i in range(self.max_resources):
             self.dynamic_asp[i]['dyn_recon_counter'] += 1
@@ -483,24 +496,34 @@ class MOfiveG_net(gym.Env):
         info["rew"] = final_reward
         self.observation = update_agent_obs(self.environment, self.observation)
 
-        # === Explainability ===   
+        # === Explainability ===
         if getattr(self, "model_for_explain", None) is not None:
             try:
                 explanation = reward_difference_explanation(
                     self.model_for_explain,
-                    dict_observation_to_array(self.observation),
+                    obs_before_step,       
                     weights=self.rewards_coeff
                 )
-                info["explanation"] = explanation
+
+                explained_best = explanation["best_action"]
+                match = int(action == explained_best)
 
                 self.explain_log.append({
-                    "step": self.step_counter,
-                    "best_action": explanation["best_action"],
-                    "alt_action": explanation["alternative_action"],
-                    "summary": explanation["summary"],
-                    "resource_diff": explanation["delta_vector"][0],
-                    "network_diff": explanation["delta_vector"][1],
-                    "security_diff": explanation["delta_vector"][2],
+                    "step":            self.step_counter,
+                    "env_action":      action,
+                    "best_action":     explained_best,
+                    "alt_action":      explanation["alternative_action"],
+                    "match":           match,
+                    "summary":         explanation["summary"],
+                    "weighted_resource_diff":   explanation["weighted_delta"][0],
+                    "weighted_network_diff":    explanation["weighted_delta"][1],
+                    "weighted_security_diff":   explanation["weighted_delta"][2],
+                    "best_weighted_q_resource": explanation["best_weighted_q"][0],
+                    "best_weighted_q_network":  explanation["best_weighted_q"][1],
+                    "best_weighted_q_security": explanation["best_weighted_q"][2],
+                    "alt_weighted_q_resource":  explanation["alt_weighted_q"][0],
+                    "alt_weighted_q_network":   explanation["alt_weighted_q"][1],
+                    "alt_weighted_q_security":  explanation["alt_weighted_q"][2],
                 })
             except Exception as e:
                 info["explanation_error"] = str(e)
