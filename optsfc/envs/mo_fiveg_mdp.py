@@ -7,6 +7,7 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 import time
+import pandas as pd
 # GYM
 import gymnasium as gym
 from gym.spaces import Dict
@@ -16,6 +17,7 @@ from gymnasium import spaces
 #local files
 from .short_space_dict import observation_dictionary, space_init, obs_init, reward_init, update_agent_obs, vnfs_size, cnfs_size
 from .short_simulated_testbed import is_action_possible, get_new_simulated_observation, perform_action, get_rewards, one_step_duration, update_mtd_constraints, is_mtd_budget_zero, get_rewards_multiple_null_steps
+from .rdx import reward_difference_explanation, _build_log_entry
 
 import copy
 
@@ -32,7 +34,8 @@ from stable_baselines3.common.callbacks import BaseCallback
 
 # MORL_baselines
 from morl_baselines.multi_policy.envelope.envelope import Envelope
-from morl_baselines.single_policy.esr.eupg import EUPG
+# from morl_baselines.single_policy.esr.eupg import EUPG
+from optsfc.envs.eupg_explain import EUPG
 
 rewards_coeff = [0.4, 0.3, 0.3]
 
@@ -43,144 +46,7 @@ def scalarization(reward: np.ndarray, weights= None) -> float:
         res = float(sum(reward[:, 0] * rewards_coeff[0] + reward[:, 1] * rewards_coeff[1] + reward[:, 2] * rewards_coeff[2]))
         print("res", res)
         return res
-
-
-def get_q_values_from_model(model, obs, weights=None):
-    try:
-        obs_np = np.array(obs, dtype=np.float32)
-        if obs_np.ndim == 1:
-            obs_np = obs_np[None, :]  # batch dim
-
-        # ===== MORL Envelope =====
-        if hasattr(model, "q_net"):
-            if weights is None:
-                raise ValueError("Envelope q_net requires weights 'w' for forward pass")
-
-            w_tensor = torch.tensor(np.array(weights, dtype=np.float32), dtype=torch.float32)
-            if w_tensor.ndim == 1:
-                w_tensor = w_tensor.unsqueeze(0)  # shape (1, 3) for batch multiplication
-
-            obs_tensor = torch.tensor(obs_np, dtype=torch.float32)
-            with torch.no_grad():
-                q_values = model.q_net(obs_tensor, w_tensor)
-                q_values = q_values.cpu().numpy()
-
-            # Remove batch dimension: (1, n_actions, 3) → (n_actions, 3)
-            if q_values.ndim == 3:
-                q_values = q_values.squeeze(0)
-
-            # print("✅ Envelope Q-values obtained:", q_values)
-            return q_values
-
-        # ===== SB3 DQN-like =====
-        elif hasattr(model, "policy") and hasattr(model.policy, "q_net"):
-            obs_tensor = torch.tensor(obs_np, dtype=torch.float32)
-            with torch.no_grad():
-                q_values = model.policy.q_net(obs_tensor).cpu().numpy()
-            # print("✅ SB3 Q-values obtained:", q_values)
-            return q_values.squeeze()
-
-        else:
-            raise TypeError("Model type not supported for explanation")
-
-    except Exception as e:
-        print("❌ get_q_values_from_model failed:", e)
-        raise
-
-
-def reward_difference_explanation(model, obs, weights=None, top_k=2):
-    q_values = get_q_values_from_model(model, obs, weights)
-
-    # ===== MORL CASE =====
-    if q_values.ndim == 2:
-        if weights is None:
-            raise ValueError("Weights required for MORL explanation")
-
-        weights = np.array(weights)
-
-        # scalarized Q
-        scalar_q = q_values @ weights
-
-        # best vs alternative
-        best_action = int(np.argmax(scalar_q))
-        sorted_idx = np.argsort(scalar_q)
-        alt_action = int(sorted_idx[-top_k])
-
-        best_q = q_values[best_action]
-        alt_q  = q_values[alt_action]
-        delta  = best_q - alt_q
-
-        names = ["Resource", "Network", "Security"]
-
-        explanation_lines = []
-        main_reason = None
-        max_contrib = -np.inf
-
-        for i, name in enumerate(names):
-            diff          = delta[i]
-            weighted_diff = diff * weights[i]
-            if diff > 0:
-                explanation_lines.append(
-                    f"{name} improved by {diff:.3f} (weighted: {weighted_diff:.3f})"
-                )
-                if weighted_diff > max_contrib:
-                    max_contrib = weighted_diff
-                    main_reason = name
-            else:
-                explanation_lines.append(
-                    f"{name} decreased by {abs(diff):.3f} (weighted: {weighted_diff:.3f})"
-                )
-
-        overall_advantage = float(np.dot(delta, weights))
-
-        summary = (
-            f"Action {best_action} was chosen over action {alt_action} "
-            f"mainly due to better {main_reason}, "
-            f"with overall advantage {overall_advantage:.3f}"
-        )
-
-        return {
-            "type": "MORL",
-            "best_action": best_action,
-            "alternative_action": alt_action,
-            "best_q_vector": best_q,
-            "alt_q_vector": alt_q,
-            "best_weighted_q": best_q * weights,
-            "alt_weighted_q": alt_q  * weights,
-            "delta_vector": delta,
-            "weighted_delta": delta * weights,
-            "summary": summary,
-            "details": explanation_lines
-        }
-
-    # ===== SINGLE OBJECTIVE =====
-    else:
-        if weights is not None:
-            w = float(weights) if np.isscalar(weights) else float(weights[0])
-        else:
-            w = 1.0
-
-        best_action = int(np.argmax(q_values))
-        sorted_idx  = np.argsort(q_values)
-        alt_action  = int(sorted_idx[-top_k])
-
-        delta          = q_values[best_action] - q_values[alt_action]
-        weighted_delta = delta * w
-
-        summary = (
-            f"Action {best_action} chosen over {alt_action} "
-            f"with Q advantage {weighted_delta:.3f}"
-        )
-
-        return {
-            "type": "SingleObjective",
-            "best_action": best_action,
-            "alternative_action": alt_action,
-            "delta": float(delta),
-            "weighted_delta": float(weighted_delta),
-            "summary": summary
-        }
-
+        
         
 def dict_observation_to_array(observation):
     # Convert the dictionary observation into a numpy array
@@ -390,7 +256,6 @@ class MOfiveG_net(gym.Env):
             return dict_observation_to_array(self.observation), {}
     
     def save_explanations(self, filename="explanations.csv"):
-        import pandas as pd
         df = pd.DataFrame(self.explain_log)
         df.to_csv(filename, index=False)
 
@@ -501,30 +366,16 @@ class MOfiveG_net(gym.Env):
             try:
                 explanation = reward_difference_explanation(
                     self.model_for_explain,
-                    obs_before_step,       
-                    weights=self.rewards_coeff
+                    obs_before_step,           
+                    weights=self.rewards_coeff,
+                    env_action=action
                 )
-
-                explained_best = explanation["best_action"]
-                match = int(action == explained_best)
-
-                self.explain_log.append({
-                    "step":            self.step_counter,
-                    "env_action":      action,
-                    "best_action":     explained_best,
-                    "alt_action":      explanation["alternative_action"],
-                    "match":           match,
-                    "summary":         explanation["summary"],
-                    "weighted_resource_diff":   explanation["weighted_delta"][0],
-                    "weighted_network_diff":    explanation["weighted_delta"][1],
-                    "weighted_security_diff":   explanation["weighted_delta"][2],
-                    "best_weighted_q_resource": explanation["best_weighted_q"][0],
-                    "best_weighted_q_network":  explanation["best_weighted_q"][1],
-                    "best_weighted_q_security": explanation["best_weighted_q"][2],
-                    "alt_weighted_q_resource":  explanation["alt_weighted_q"][0],
-                    "alt_weighted_q_network":   explanation["alt_weighted_q"][1],
-                    "alt_weighted_q_security":  explanation["alt_weighted_q"][2],
-                })
+                info["explanation"] = explanation
+                self.explain_log.append(
+                    _build_log_entry(
+                        self.step_counter, action, explanation
+                    )
+                )
             except Exception as e:
                 info["explanation_error"] = str(e)
 
@@ -692,6 +543,9 @@ def train(agent_type, policy, total_timesteps, model_name, log_dir, budget_reset
         model = TD3(policy, env_train, verbose=1, tensorboard_log="./tmp/"+model_name+"/")
     else: #MaskablePPO
         model = MaskablePPO(policy, env_train, verbose=1, tensorboard_log="./tmp/"+model_name+"/")
+    
+    env_train.env.model_for_explain = model
+
     with open(log_dir+'Log'+model_name+'.txt','a') as f:
         with contextlib.redirect_stdout(f):
             model.learn(total_timesteps, callback=callback)
@@ -699,8 +553,20 @@ def train(agent_type, policy, total_timesteps, model_name, log_dir, budget_reset
     plot_results(log_dir, "OptSFC " + agent_type + " Learning Curve").savefig(log_dir + 'plot_' + model_name + '.pdf')
     # save the model
     model.save(log_dir + model_name + "last")
-    del env_train, model
+
+    if env_train.env.explain_log:
+        df_log     = pd.DataFrame(env_train.env.explain_log)
+        match_rate = df_log["match"].mean() * 100
+        print(f"Explanation match rate: {match_rate:.1f}%")
+        print(f"   Matched: {df_log['match'].sum()} / {len(df_log)}")
+
+    # del env_train, model
+    # gc.collect()
+    actual_env = env_train.env
+    del model
     gc.collect()
+
+    return actual_env
 
 
 # functions for plotting

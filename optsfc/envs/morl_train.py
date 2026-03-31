@@ -20,7 +20,8 @@ from sb3_contrib import MaskablePPO
 from morl_baselines.multi_policy.pareto_q_learning.pql import PQL
 from morl_baselines.multi_policy.envelope.envelope import Envelope
 # from morl_baselines.multi_policy.morld.morld import MORLD
-from morl_baselines.single_policy.esr.eupg import EUPG
+# from morl_baselines.single_policy.esr.eupg import EUPG
+from optsfc.envs.eupg_explain import EUPG
 import torch as th
 
 rewards_coeff = [0.4, 0.3, 0.3]
@@ -425,7 +426,7 @@ def train_Envelope(total_timesteps, model_name, budget_reset="episodic", gamma=0
         import pandas as pd
         df_log = pd.DataFrame(env.explain_log)
         match_rate = df_log["match"].mean() * 100
-        print(f"Explanation match rate: {match_rate:.1f}%")
+        print(f"Match rate: {match_rate:.1f}%")
         print(f"   Matched: {df_log['match'].sum()} / {len(df_log)}")
     return env
 
@@ -456,8 +457,19 @@ def train_eupg(total_timesteps, model_name, budget_reset="episodic"):
     weights = np.array(rewards_coeff)
 
     agent = EUPG(env, scalarization=scalarization, weights=weights, gamma=0.99, log=False, learning_rate=0.001)
+
+    env.model_for_explain = agent
+
     agent.train(total_timesteps=total_timesteps, eval_env=eval_env)
     eupg_model_save(agent, save_dir, filename)
+
+    if env.explain_log:
+        import pandas as pd
+        df_log     = pd.DataFrame(env.explain_log)
+        match_rate = df_log["match"].mean() * 100
+        print(f"Explanation match rate: {match_rate:.1f}%")
+        print(f"   Matched: {df_log['match'].sum()} / {len(df_log)}")
+    return env
 
 
 def split_train_eupg(total_timesteps, timesteps_split, model_name, budget_reset="episodic"):
