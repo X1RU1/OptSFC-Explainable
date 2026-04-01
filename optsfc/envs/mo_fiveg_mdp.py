@@ -35,7 +35,7 @@ from stable_baselines3.common.callbacks import BaseCallback
 # MORL_baselines
 from morl_baselines.multi_policy.envelope.envelope import Envelope
 # from morl_baselines.single_policy.esr.eupg import EUPG
-from optsfc.envs.eupg_explain import EUPG
+from optsfc.envs.eupg.eupg_explain import EUPG
 
 rewards_coeff = [0.4, 0.3, 0.3]
 
@@ -368,7 +368,8 @@ class MOfiveG_net(gym.Env):
                     self.model_for_explain,
                     obs_before_step,           
                     weights=self.rewards_coeff,
-                    env_action=action
+                    env_action=action,
+                    env=self
                 )
                 info["explanation"] = explanation
                 self.explain_log.append(
@@ -376,8 +377,21 @@ class MOfiveG_net(gym.Env):
                         self.step_counter, action, explanation
                     )
                 )
+            # except Exception as e:
+            #     info["explanation_error"] = str(e)
             except Exception as e:
                 info["explanation_error"] = str(e)
+                print(f"❌ step {self.step_counter}: {e}")
+                import traceback; traceback.print_exc()
+        
+        if getattr(self, "critic_trainer", None) is not None:
+            self.critic_trainer.store(
+                obs_before_step,                     
+                np.array(self.reward_noScalar, dtype=np.float32),       
+                dict_observation_to_array(self.observation),              
+                done
+            )
+            self.critic_trainer.update()
 
         if self.non_MORL:
             if self.policy.startswith("Cnn"):

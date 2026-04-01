@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+from optsfc.envs.eupg.decomposed_critic import DecomposedCritic
 
 rewards_coeff = [0.4, 0.3, 0.3]
 OBJ_NAMES     = ["Resource", "Network", "Security"]
@@ -16,11 +17,12 @@ def _detect_algo(model) -> str:
         return type(model).__name__
     return "Unknown"
 
-def _get_q_values(model, obs_np, weights_arr, algo):
+def _get_q_values(model, obs_np, weights_arr, algo, env=None):
     """
     Return Q-value of different RL 
     return (q_values, q_type)
       MORL_vec    → (n_actions, 3)  Decomposed reward (Envelope)
+      EUPG_decomposed
       MORL_proxy  → (n_actions, 3)  EUPG proxy
       Scalar      → (n_actions,)    DQN scalarized 
       Scalar_proxy→ (n_actions,)    EUPG fallback
@@ -39,8 +41,30 @@ def _get_q_values(model, obs_np, weights_arr, algo):
         return q, "MORL_vec"
 
     elif algo == "EUPG":
-        probs = model.get_action_probabilities(obs_np)
-        return probs.astype(np.float32), "EUPG_prob"
+        decomposed_critic = getattr(model, "decomposed_critic", None)
+
+        if decomposed_critic is not None:
+            # V(s) + prob -> Q
+            probs = model.get_action_probabilities(
+                obs_np,
+                getattr(env, "accrued_reward", None)
+            )
+            with torch.no_grad():
+                v = decomposed_critic(obs_t).squeeze(0).cpu().numpy()   # (N_OBJ,)
+
+            n_actions = len(probs)
+            # Q^c(s,a) ≈ V^c(s) * π(a|s) / mean(π)
+            prob_weight = probs / (probs.mean() + 1e-8)  # (n_actions,)
+            q_mat = np.outer(prob_weight, v)              # (n_actions, 3)
+            return q_mat.astype(np.float32), "EUPG_decomposed"
+
+        else:
+            # fallback: action probability proxy
+            probs = model.get_action_probabilities(
+                obs_np,
+                getattr(env, "accrued_reward", None)
+            )
+            return probs.astype(np.float32), "EUPG_prob"
 
     elif algo == "DQN":
         with torch.no_grad():
@@ -63,7 +87,7 @@ def _select_actions(q_values, weights_arr, q_type, algo):
     DQN:      scalar_q = q_values              (scalarized Q)
     PPO:      scalar_q = log_probs             (policy approximation)
     """
-    if q_type == "MORL_vec":
+    if q_type in ("MORL_vec", "MORL_proxy", "EUPG_decomposed"):
         # Envelope: argmax_a Σ w_c Q_c(s,a)
         scalar_q = q_values @ weights_arr
     else:
@@ -208,12 +232,12 @@ def _build_scalar_summary(best_action, alt_action,
         )
     return summary
 
-def reward_difference_explanation(model, obs, weights=None, top_k=2, env_action=None):
+def reward_difference_explanation(model, obs, weights=None, top_k=2, env_action=None, env=None):
     weights_arr = np.array(weights if weights is not None else rewards_coeff, dtype=np.float32)
     obs_np = np.array(obs, dtype=np.float32)
     algo   = _detect_algo(model)
     q_values, q_type = _get_q_values(
-        model, obs_np, weights_arr, algo
+        model, obs_np, weights_arr, algo, env=env
     )
     best_action, alt_action, scalar_q = _select_actions(
         q_values, weights_arr, q_type, algo
@@ -222,7 +246,7 @@ def reward_difference_explanation(model, obs, weights=None, top_k=2, env_action=
             if env_action is not None else None
 
     # ── Envelope：MORL RDX ──────────────────────────────
-    if q_type == "MORL_vec":
+    if q_type in ("MORL_vec", "MORL_proxy", "EUPG_decomposed"):
         best_q = q_values[best_action]
         alt_q  = q_values[alt_action]
         delta  = best_q - alt_q
@@ -361,7 +385,7 @@ def _build_log_entry(step_counter, action, explanation):
 
     exp_type = explanation["type"]
 
-    # ── Envelope RDX ────────────────────────────────────
+    # ── Envelope / EUPG_decomposed RDX ────────────────────────────────────
     if exp_type == "MORL_RDX":
         entry.update({
             "weighted_resource_diff":
