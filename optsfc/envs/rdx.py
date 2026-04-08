@@ -71,12 +71,28 @@ def _get_q_values(model, obs_np, weights_arr, algo, env=None):
             q = model.policy.q_net(obs_t).cpu().numpy().squeeze()
         return q.astype(np.float32), "Scalar"
 
+    # else:  # PPO / A2C
+    #     with torch.no_grad():
+    #         dist = model.policy.get_distribution(obs_t)
+    #         log_probs = dist.distribution.logits.squeeze().cpu().numpy()
+    #     return log_probs.astype(np.float32), "LogProb"
     else:  # PPO / A2C
         with torch.no_grad():
-            dist = model.policy.get_distribution(obs_t)
-            log_probs = dist.distribution.logits\
-                            .squeeze().cpu().numpy()
-        return log_probs.astype(np.float32), "LogProb"
+            features = model.policy.extract_features(obs_t)
+            latent_pi, latent_vf = model.policy.mlp_extractor(features)
+
+            # V(s)：value network output
+            value = model.policy.value_net(latent_vf).item()
+
+            # log π(a|s)：policy logits
+            dist      = model.policy.get_distribution(obs_t)
+            log_probs = dist.distribution.logits.squeeze().cpu().numpy()
+
+        # A(s,a) ≈ log_prob - mean(log_prob) (centralization)
+        # Q(s,a) ≈ V(s) + A(s,a)
+        advantage = log_probs - log_probs.mean()
+        q_approx  = value + advantage              # (n_actions,)
+        return q_approx.astype(np.float32), "PPO_advantage"
 
 def _select_actions(q_values, weights_arr, q_type, algo):
     """
@@ -199,11 +215,19 @@ def _build_scalar_summary(best_action, alt_action,
             "this is a policy-preference adaptation.]"
         )
     # ── PPO/A2C：Single-objective policy-based ─────────────────────────
-    elif q_type == "LogProb":
-        metric_name = "log-probability"
-        note        = (
-            f"[{algo}: single-objective policy-based algorithm, "
-            "no Q-decomposition]"
+    # elif q_type == "LogProb":
+    #     metric_name = "log-probability"
+    #     note        = (
+    #         f"[{algo}: single-objective policy-based algorithm, "
+    #         "no Q-decomposition]"
+    #     )
+    elif q_type == "PPO_advantage":
+        metric_name = "advantage-based Q approximation"
+        note = (
+            "[PPO adaptation: Q(s,a) ≈ V(s) + A(s,a), "
+            "where V(s) is from the value network and "
+            "A(s,a) is approximated via centralized log-probabilities. "
+            "Reward decomposition not applicable.]"
         )
     # ── DQN：Single-objective Q-based, with no reward decomposition ────────────────
     else:
