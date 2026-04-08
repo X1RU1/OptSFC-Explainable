@@ -26,7 +26,7 @@ def _get_q_values(model, obs_np, weights_arr, algo, env=None):
       MORL_proxy  → (n_actions, 3)  EUPG proxy
       Scalar      → (n_actions,)    DQN scalarized 
       Scalar_proxy→ (n_actions,)    EUPG fallback
-      LogProb     → (n_actions,)    PPO log-prob
+      PPO_advantage     → (n_actions,)    PPO Advantage-based approximation
     """
     obs_t = torch.tensor(obs_np, dtype=torch.float32)
     if obs_t.ndim == 1:
@@ -71,11 +71,6 @@ def _get_q_values(model, obs_np, weights_arr, algo, env=None):
             q = model.policy.q_net(obs_t).cpu().numpy().squeeze()
         return q.astype(np.float32), "Scalar"
 
-    # else:  # PPO / A2C
-    #     with torch.no_grad():
-    #         dist = model.policy.get_distribution(obs_t)
-    #         log_probs = dist.distribution.logits.squeeze().cpu().numpy()
-    #     return log_probs.astype(np.float32), "LogProb"
     else:  # PPO / A2C
         with torch.no_grad():
             features = model.policy.extract_features(obs_t)
@@ -107,7 +102,7 @@ def _select_actions(q_values, weights_arr, q_type, algo):
         # Envelope: argmax_a Σ w_c Q_c(s,a)
         scalar_q = q_values @ weights_arr
     else:
-        # DQN / EUPG_prob / LogProb scalarized value sorted
+        # DQN / EUPG_prob / PPO_advantage scalarized value sorted
         scalar_q = q_values
 
     best_action = int(np.argmax(scalar_q))
@@ -215,12 +210,6 @@ def _build_scalar_summary(best_action, alt_action,
             "this is a policy-preference adaptation.]"
         )
     # ── PPO/A2C：Single-objective policy-based ─────────────────────────
-    # elif q_type == "LogProb":
-    #     metric_name = "log-probability"
-    #     note        = (
-    #         f"[{algo}: single-objective policy-based algorithm, "
-    #         "no Q-decomposition]"
-    #     )
     elif q_type == "PPO_advantage":
         metric_name = "advantage-based Q approximation"
         note = (
@@ -377,18 +366,18 @@ def reward_difference_explanation(model, obs, weights=None, top_k=2, env_action=
         return {
             "type":               "SingleObjective_PolicyBased",
             "algo":               algo,
-            "q_type":             "LogProb",
+            "q_type":             q_type,
             "best_action":        best_action,
             "alternative_action": alt_action,
             "env_action":         env_action,
             "match":              match,
             "summary":            summary,
-            "best_logprob":       float(scalar_q[best_action]),
-            "alt_logprob":        float(scalar_q[alt_action]),
-            "delta_logprob":      delta,
+            "best_advantage":       float(scalar_q[best_action]),
+            "alt_advantage":        float(scalar_q[alt_action]),
+            "delta_advantage":      delta,
             "note": (
                 f"{algo} is a single-objective policy-gradient algorithm. "
-                "Log-probability is used as a proxy for action preference. "
+                "Advantage-based approximation is used as a proxy for action preference. "
                 "Q-values and reward decomposition are not available."
             ),
         }
@@ -457,9 +446,9 @@ def _build_log_entry(step_counter, action, explanation):
     # ── PPO / A2C ────────────────────────────────────────────
     elif exp_type == "SingleObjective_PolicyBased":
         entry.update({
-            "best_logprob":  explanation["best_logprob"],
-            "alt_logprob":   explanation["alt_logprob"],
-            "delta_logprob": explanation["delta_logprob"],
+            "best_advantage":  explanation["best_advantage"],
+            "alt_advantage":   explanation["alt_advantage"],
+            "delta_advantage": explanation["delta_advantage"],
         })
 
     return entry
