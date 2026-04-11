@@ -43,28 +43,19 @@ def _get_q_values(model, obs_np, weights_arr, algo, env=None):
     elif algo == "EUPG":
         decomposed_critic = getattr(model, "decomposed_critic", None)
 
-        if decomposed_critic is not None:
-            # V(s) + prob -> Q
-            probs = model.get_action_probabilities(
-                obs_np,
-                getattr(env, "accrued_reward", None)
-            )
-            with torch.no_grad():
-                v = decomposed_critic(obs_t).squeeze(0).cpu().numpy()   # (N_OBJ,)
+        # V(s) + prob -> Q
+        probs = model.get_action_probabilities(
+            obs_np,
+            getattr(env, "accrued_reward", None)
+        )
+        with torch.no_grad():
+            v = decomposed_critic(obs_t).squeeze(0).cpu().numpy()   # (N_OBJ,)
 
-            n_actions = len(probs)
-            # Q^c(s,a) ≈ V^c(s) * π(a|s) / mean(π)
-            prob_weight = probs / (probs.mean() + 1e-8)  # (n_actions,)
-            q_mat = np.outer(prob_weight, v)              # (n_actions, 3)
-            return q_mat.astype(np.float32), "EUPG_decomposed"
-
-        else:
-            # fallback: action probability proxy
-            probs = model.get_action_probabilities(
-                obs_np,
-                getattr(env, "accrued_reward", None)
-            )
-            return probs.astype(np.float32), "EUPG_prob"
+        n_actions = len(probs)
+        # Q^c(s,a) ≈ V^c(s) * π(a|s) / mean(π)
+        prob_weight = probs / (probs.mean() + 1e-8)  # (n_actions,)
+        q_mat = np.outer(prob_weight, v)              # (n_actions, 3)
+        return q_mat.astype(np.float32), "EUPG_decomposed"
 
     elif algo == "DQN":
         with torch.no_grad():
@@ -102,7 +93,7 @@ def _select_actions(q_values, weights_arr, q_type, algo):
         # Envelope: argmax_a Σ w_c Q_c(s,a)
         scalar_q = q_values @ weights_arr
     else:
-        # DQN / EUPG_prob / PPO_advantage scalarized value sorted
+        # DQN / PPO_advantage scalarized value sorted
         scalar_q = q_values
 
     best_action = int(np.argmax(scalar_q))
@@ -196,21 +187,10 @@ def _build_scalar_summary(best_action, alt_action,
                           delta, algo, q_type,
                           env_action, match):
     """
-    Single-objective / policy-based / EUPG adaptation summary
+    Single-objective / policy-based 
     """
-    # ── EUPG：MORL but don't have per-action Q, use probability for adaptation ──────
-    if q_type == "EUPG_prob":
-        metric_name = "action probability"
-        note = (
-            "[EUPG: multi-objective policy-gradient algorithm. "
-            "No per-action Q-vector available. "
-            "Action preference derived from policy distribution "
-            "π(a | s, r̃). "
-            "Full RDX reward decomposition is not applicable; "
-            "this is a policy-preference adaptation.]"
-        )
     # ── PPO/A2C：Single-objective policy-based ─────────────────────────
-    elif q_type == "PPO_advantage":
+    if q_type == "PPO_advantage":
         metric_name = "advantage-based Q approximation"
         note = (
             "[PPO adaptation: Q(s,a) ≈ V(s) + A(s,a), "
@@ -298,34 +278,6 @@ def reward_difference_explanation(model, obs, weights=None, top_k=2, env_action=
             "improved":           improved,
             "degraded":           degraded,
             "details":            detail_lines,
-        }
-
-    # ── EUPG：MORL but no Q, policy probability adaptation ────────
-    elif q_type == "EUPG_prob":
-        delta   = float(scalar_q[best_action] - scalar_q[alt_action])
-        summary = _build_scalar_summary(
-            best_action, alt_action,
-            delta, algo, q_type,
-            env_action, match
-        )
-        return {
-            "type":               "MORL_PolicyAdaptation",
-            "algo":               "EUPG",
-            "q_type":             q_type,
-            "best_action":        best_action,
-            "alternative_action": alt_action,
-            "env_action":         env_action,
-            "match":              match,
-            "summary":            summary,
-            "best_prob":          float(scalar_q[best_action]),
-            "alt_prob":           float(scalar_q[alt_action]),
-            "delta_prob":         delta,
-            "note": (
-                "EUPG is a MORL algorithm but does not maintain "
-                "per-action Q-vectors. Policy probability distribution "
-                "is used as an adaptation of RDX. "
-                "Objective-level reward decomposition is not available."
-            ),
         }
 
     # ── DQN: Single-objective Q-based ───────────────────────────────────
