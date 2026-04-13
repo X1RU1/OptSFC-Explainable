@@ -386,9 +386,10 @@ class MOfiveG_net(gym.Env):
         
         if getattr(self, "critic_trainer", None) is not None:
             self.critic_trainer.store(
-                obs_before_step,                     
-                np.array(self.reward_noScalar, dtype=np.float32),       
-                dict_observation_to_array(self.observation),              
+                obs_before_step,
+                action,                                       
+                np.array(self.reward_noScalar, dtype=np.float32),
+                dict_observation_to_array(self.observation),
                 done
             )
             self.critic_trainer.update()

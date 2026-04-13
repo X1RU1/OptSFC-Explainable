@@ -404,33 +404,36 @@ class EUPG(MOPolicy, MOAgent):
         accrued_reward: Optional[np.ndarray] = None
     ) -> np.ndarray:
         """
-        Return all action distribution of current observation
-        for RDX policy-based adaptation
-        
-        Args:
-            obs: current observation
-            accrued_reward: cumulative reward, zero-vector if None
-        
-        Returns:
-            probs: (n_actions,) 
+        Return the action probability distribution pi(a|s) for all actions.
+
+        PolicyNet.forward() uses sigmoid + sum-normalisation, so the output is
+        already a valid probability distribution. No additional softmax needed.
+        A numerical clip + renormalisation step guards against near-zero entries
+        that could cause division errors in the proxy Q construction in rdx.py.
+
+        Used by:
+          - rdx.py EUPG branch: builds the proxy Q matrix via outer product
+          - _select_actions: argmax(probs) defines reference_action for EUPG,
+            consistent with the Categorical(probs).sample() used in eval()
         """
         if type(obs) is int:
             obs_t = th.as_tensor([obs]).float().to(self.device)
         else:
             obs_t = th.as_tensor(obs).float().to(self.device)
-        
+
         if obs_t.ndim == 1:
             obs_t = obs_t.unsqueeze(0)
 
-        # action preference before episode
         if accrued_reward is None:
-            acc_r = th.zeros(
-                1, self.reward_dim, dtype=th.float32
-            ).to(self.device)
+            acc_r = th.zeros(1, self.reward_dim, dtype=th.float32).to(self.device)
         else:
             acc_r = th.as_tensor(accrued_reward).float().to(self.device)
             if acc_r.ndim == 1:
                 acc_r = acc_r.unsqueeze(0)
 
-        probs = self.net(obs_t, acc_r)          # (1, n_actions)
-        return probs.squeeze().cpu().numpy()    # (n_actions,)
+        probs    = self.net(obs_t, acc_r)            # (1, n_actions)
+        probs_np = probs.squeeze(0).cpu().numpy()    # (n_actions,)
+
+        probs_np = np.clip(probs_np, 1e-8, 1.0)
+        probs_np /= probs_np.sum()
+        return probs_np

@@ -22,7 +22,7 @@ from morl_baselines.multi_policy.envelope.envelope import Envelope
 # from morl_baselines.multi_policy.morld.morld import MORLD
 # from morl_baselines.single_policy.esr.eupg import EUPG
 from optsfc.envs.eupg.eupg_explain import EUPG
-from optsfc.envs.eupg.decomposed_critic import DecomposedCritic, EUPGCriticTrainer
+from optsfc.envs.eupg.decomposed_critic import DecomposedQNet, DecomposedQTrainer
 import torch as th
 
 rewards_coeff = [0.4, 0.3, 0.3]
@@ -459,10 +459,10 @@ def train_eupg(total_timesteps, model_name, budget_reset="episodic"):
 
     agent = EUPG(env, scalarization=scalarization, weights=weights, gamma=0.99, log=False, learning_rate=0.001)
 
-    obs_dim = env.observation_space.shape[0]
-    critic  = DecomposedCritic(obs_dim=obs_dim)
-    trainer = EUPGCriticTrainer(critic, lr=3e-4)
-    agent.decomposed_critic = critic
+    obs_dim  = env.observation_space.shape[0]
+    q_net    = DecomposedQNet(obs_dim=obs_dim, n_actions=env.n_actions)
+    trainer  = DecomposedQTrainer(q_net, weights=rewards_coeff, lr=3e-4)
+    agent.decomposed_q_net = q_net
 
     env.model_for_explain = agent
     env.critic_trainer = trainer
