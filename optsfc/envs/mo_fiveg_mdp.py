@@ -18,6 +18,7 @@ from gymnasium import spaces
 from .short_space_dict import observation_dictionary, space_init, obs_init, reward_init, update_agent_obs, vnfs_size, cnfs_size
 from .short_simulated_testbed import is_action_possible, get_new_simulated_observation, perform_action, get_rewards, one_step_duration, update_mtd_constraints, is_mtd_budget_zero, get_rewards_multiple_null_steps
 from .rdx import reward_difference_explanation, _build_log_entry
+from optsfc.envs.ppo.critic import PPOQNet, PPOQTrainer
 
 import copy
 
@@ -385,13 +386,14 @@ class MOfiveG_net(gym.Env):
                 import traceback; traceback.print_exc()
         
         if getattr(self, "critic_trainer", None) is not None:
+            # PPO: scalar reward
             self.critic_trainer.store(
-                obs_before_step,
-                action,                                       
-                np.array(self.reward_noScalar, dtype=np.float32),
-                dict_observation_to_array(self.observation),
-                done
-            )
+                    obs_before_step,
+                    action,
+                    float(info["rew"]),
+                    dict_observation_to_array(self.observation),
+                    done
+                )              
             self.critic_trainer.update()
 
         if self.non_MORL:
@@ -560,6 +562,12 @@ def train(agent_type, policy, total_timesteps, model_name, log_dir, budget_reset
         model = MaskablePPO(policy, env_train, verbose=1, tensorboard_log="./tmp/"+model_name+"/")
     
     env_train.env.model_for_explain = model
+
+    obs_dim  = env_train.env.observation_space.shape[0]
+    ppo_q    = PPOQNet(obs_dim=obs_dim, n_actions=env_train.env.n_actions)
+    ppo_q_trainer = PPOQTrainer(ppo_q, gamma=0.99)
+    model.ppo_q_net     = ppo_q
+    env_train.env.critic_trainer = ppo_q_trainer
 
     with open(log_dir+'Log'+model_name+'.txt','a') as f:
         with contextlib.redirect_stdout(f):
