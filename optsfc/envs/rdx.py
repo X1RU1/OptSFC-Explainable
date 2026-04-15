@@ -36,13 +36,18 @@ def _get_q_values(model, obs_np, weights_arr, algo, env=None):
 
     aux per algorithm:
       Envelope        : {}
-      EUPG (QNet)     : {"probs": (n_actions,)}  policy probabilities,
-                        kept for logging; reference_action uses argmax(Q)
+      EUPG (QNet)     : {"probs": (n_actions,)}  policy probabilities;
+                        reference_action uses argmax(probs) to reflect
+                        EUPG's stochastic policy intent
       EUPG (fallback) : {"probs": (n_actions,)}  reference_action uses
                         argmax(probs) to avoid V(s) sign ambiguity
       DQN             : {}
-      PPO (QNet)      : {"q_vals": (n_actions,)} raw Q before mean subtraction
-      PPO (fallback)  : {"logits": (n_actions,)} raw policy logits
+      PPO (QNet)      : {"q_vals": (n_actions,), "logits": (n_actions,)}
+                        raw Q values and policy logits; reference_action
+                        uses argmax(logits) to reflect PPO's stochastic
+                        policy intent, consistent with the fallback path
+      PPO (fallback)  : {"logits": (n_actions,)} raw policy logits;
+                        reference_action uses argmax(logits)
     """
     obs_t = torch.tensor(obs_np, dtype=torch.float32)
     if obs_t.ndim == 1:
@@ -63,8 +68,11 @@ def _get_q_values(model, obs_np, weights_arr, algo, env=None):
         )
         q_net = getattr(model, "decomposed_q_net", None)
         if q_net is not None:
-            # True per-action per-objective Q trained on EUPG's own transitions.
-            # reference_action = argmax(Q @ weights), same path as Envelope.
+            # Per-action per-objective Q trained on EUPG's own transitions.
+            # reference_action = argmax(probs), consistent with EUPG's
+            # stochastic policy: the greedy Q target estimates a policy
+            # different from EUPG's own, so probs better reflects EUPG's
+            # actual decision criterion.
             with torch.no_grad():
                 q_vec = q_net(obs_t).squeeze(0).cpu().numpy()  # (n_actions, N_OBJ)
             return q_vec.astype(np.float32), "MORL_vec", {"probs": probs}
@@ -89,12 +97,19 @@ def _get_q_values(model, obs_np, weights_arr, algo, env=None):
         ppo_q_net = getattr(model, "ppo_q_net", None)
         if ppo_q_net is not None:
             # TD-trained Q(s,a) for all actions, using PPO's own transitions.
-            # Returned as raw Q values; delta between any two actions equals
-            # q_vals[a] - q_vals[b] (mean cancels), so passing q_vals directly
-            # is equivalent to passing advantage but semantically clearer.
+            # reference_action = argmax(logits), consistent with PPO's stochastic
+            # policy intent: the independently trained Q network estimates a greedy
+            # policy different from PPO's own stochastic policy, so logits better
+            # reflect PPO's actual decision criterion. Q values are retained in aux
+            # for delta computation in the explanation.
             with torch.no_grad():
                 q_vals = ppo_q_net(obs_t).squeeze(0).cpu().numpy()  # (n_actions,)
-            return q_vals.astype(np.float32), "PPO_Q", {"q_vals": q_vals.astype(np.float32)}
+                dist   = model.policy.get_distribution(obs_t)
+                logits = dist.distribution.logits.squeeze().cpu().numpy()
+            return q_vals.astype(np.float32), "PPO_Q", {
+                "q_vals": q_vals.astype(np.float32),
+                "logits": logits.astype(np.float32),
+            }
         else:
             # Fallback: raw policy logits as a heuristic proxy.
             # logits[a] > logits[b] implies pi(a|s) > pi(b|s) but does not
@@ -121,23 +136,28 @@ def _select_actions(q_values, weights_arr, q_type, algo, env_action=None, aux=No
                        Falls back to reference_action when env_action is None.
 
     reference_action = deterministic optimum under each algorithm's criterion:
-      Envelope               -> argmax(Q_vec @ weights)
-      EUPG with DecomposedQNet -> argmax(Q_vec @ weights)  [same as Envelope]
-      EUPG fallback          -> argmax(probs)              [avoids V(s) sign issue]
-      DQN                    -> argmax(Q_scalar)
-      PPO with PPOQNet       -> argmax(Q_scalar)
-      PPO fallback           -> argmax(logits)
+      Envelope                 -> argmax(Q_vec @ weights)
+      EUPG with DecomposedQNet -> argmax(probs)  [stochastic policy reference;
+                                  DecomposedQNet uses a greedy TD target that
+                                  estimates a different policy than EUPG's own]
+      EUPG fallback            -> argmax(probs)  [avoids V(s) sign ambiguity]
+      DQN                      -> argmax(Q_scalar)
+      PPO with PPOQNet         -> argmax(logits)  [stochastic policy reference;
+                                  PPOQNet uses a greedy TD target that estimates
+                                  a different policy than PPO's own stochastic one]
+      PPO fallback             -> argmax(logits)
 
     alt_action:
       reference_action != best_action -> alt = reference_action
-        (the greedy optimum serves as the natural contrast)
+        (the greedy/stochastic optimum serves as the natural contrast)
       reference_action == best_action -> alt = second-highest scalar_q
         (agent chose the optimum; contrast against next-best option)
 
     match = (best_action == reference_action)
       Envelope / DQN : expected ~100% for a converged deterministic policy
-      EUPG / PPO     : True when the stochastic sample happened to equal
-                       the deterministic optimum
+      EUPG / PPO     : structurally low; stochastic sampling from the policy
+                       distribution vs a deterministic reference guarantees
+                       frequent mismatches regardless of policy quality
 
     Returns: best_action, alt_action, scalar_q, reference_action, match
     """
@@ -150,15 +170,21 @@ def _select_actions(q_values, weights_arr, q_type, algo, env_action=None, aux=No
         scalar_q = q_values   # already scalar: DQN, PPO_Q, PPO_advantage
 
     # Determine reference_action per algorithm semantics.
-    if q_type == "EUPG_decomposed" and "probs" in aux:
-        # Proxy Q path: use probs directly to avoid V(s) sign ambiguity.
+    if q_type in ("MORL_vec", "EUPG_decomposed") and algo == "EUPG" and "probs" in aux:
+        # Both EUPG paths use argmax(probs) as reference, reflecting EUPG's
+        # stochastic policy intent. For the DecomposedQNet path, the greedy
+        # TD target estimates a policy different from EUPG's own stochastic
+        # policy, making probs the more faithful reference criterion.
         reference_action = int(np.argmax(aux["probs"]))
-    elif q_type == "PPO_advantage" and "logits" in aux:
-        # Logit fallback path: highest logit = policy's deterministic preference.
+    elif algo in _STOCHASTIC_ALGOS and "logits" in aux:
+        # Both PPO paths use argmax(logits) as reference, reflecting PPO's
+        # stochastic policy intent. For the PPOQNet path, the greedy TD target
+        # estimates a policy different from PPO's own stochastic policy, making
+        # logits the more faithful reference criterion. The fallback path uses
+        # logits directly as the only available proxy.
         reference_action = int(np.argmax(aux["logits"]))
     else:
-        # All other paths (Envelope, EUPG+QNet, DQN, PPO+QNet):
-        # greedy argmax on scalar_q.
+        # Deterministic paths (Envelope, DQN): greedy argmax on scalar_q.
         reference_action = int(np.argmax(scalar_q))
 
     # best_action: what the agent actually did.
@@ -167,7 +193,7 @@ def _select_actions(q_values, weights_arr, q_type, algo, env_action=None, aux=No
     else:
         best_action = reference_action
 
-    # match: did the agent's action coincide with the deterministic optimum?
+    # match: did the agent's action coincide with the reference?
     match = int(best_action == reference_action) if env_action is not None else None
 
     # alt_action: the contrast action for the explanation.
@@ -189,12 +215,15 @@ def _build_morl_summary(best_action, alt_action, reference_action,
     Positive delta[i]: best_action is better on objective i.
 
     match=None  : no env_action; pure pairwise comparison.
-    match=True  : agent chose the deterministic optimum;
-                  alt is the next-best action.
-    match=False : agent did not choose the deterministic optimum;
-                  alt is the reference (greedy optimum).
-                  For stochastic algos this is expected (sampling).
-                  For deterministic algos this implies non-convergence.
+    match=True  : agent chose the reference action;
+                  alt is the next-best action (by scalar_q).
+    match=False : agent did not choose the reference action;
+                  alt is the reference action.
+                  For EUPG / PPO this is structurally expected: stochastic
+                  sampling from the policy distribution will frequently
+                  deviate from any fixed deterministic reference, regardless
+                  of policy quality.
+                  For Envelope / DQN this implies non-convergence or exploration.
     """
     improved = []
     degraded = []
@@ -214,6 +243,14 @@ def _build_morl_summary(best_action, alt_action, reference_action,
     proxy_note    = " [proxy Q]" if q_type == "EUPG_decomposed" else ""
     is_stochastic = algo in _STOCHASTIC_ALGOS
 
+    # For EUPG (both paths), the reference is argmax(probs).
+    is_eupg = algo == "EUPG"
+    ref_label = (
+        "highest-probability action"
+        if is_eupg
+        else "highest-Q action"
+    )
+
     if match is None:
         summary = (
             f"Action {best_action} vs action {alt_action}{proxy_note}: "
@@ -223,8 +260,7 @@ def _build_morl_summary(best_action, alt_action, reference_action,
     elif match:
         chosen_desc = (
             f"Action {best_action} was executed and matches the "
-            f"{'highest-probability' if q_type == 'EUPG_decomposed' else 'highest-Q'} "
-            f"action."
+            f"{ref_label} (action {reference_action})."
         )
         if all(d >= 0 for d in delta):
             verdict = "better on all objectives"
@@ -242,11 +278,6 @@ def _build_morl_summary(best_action, alt_action, reference_action,
         )
 
     else:
-        ref_desc = (
-            f"highest-probability action (action {reference_action})"
-            if q_type == "EUPG_decomposed"
-            else f"highest-Q action (action {reference_action})"
-        )
         if all(d >= 0 for d in delta):
             verdict = "better on all objectives"
         elif all(d <= 0 for d in delta):
@@ -258,15 +289,15 @@ def _build_morl_summary(best_action, alt_action, reference_action,
             )
         reason = (
             f"Action {best_action} was executed via stochastic sampling; "
-            f"the {ref_desc} was not chosen."
+            f"the {ref_label} (action {reference_action}) was not chosen."
             if is_stochastic else
             f"Action {best_action} was executed; "
-            f"the {ref_desc} was not chosen "
+            f"the {ref_label} (action {reference_action}) was not chosen "
             f"(possible cause: exploration or policy not converged)."
         )
         summary = (
             f"{reason} "
-            f"Relative to {ref_desc}{proxy_note}: "
+            f"Relative to the {ref_label}{proxy_note}: "
             f"action {best_action} is {verdict}. "
             f"Per-component: {component_str}."
         )
@@ -288,9 +319,13 @@ def _build_scalar_summary(best_action, alt_action, reference_action,
 
     if q_type == "PPO_Q":
         metric    = "TD-trained Q-value"
-        ref_label = f"highest-Q action (action {reference_action})"
+        ref_label = f"highest-logit action (action {reference_action})"
         algo_note = (
             "[PPO: Q(s,a) trained via TD on PPO's own transitions. "
+            "reference_action = argmax(logits) to reflect PPO's stochastic "
+            "policy intent; PPOQNet's greedy TD target estimates a policy "
+            "different from PPO's own. Match rate is structurally low due to "
+            "stochastic policy sampling. "
             "Reward decomposition not applicable.]"
         )
     elif q_type == "PPO_advantage":
@@ -450,9 +485,12 @@ def _build_log_entry(step_counter, action, explanation):
 
     Columns:
       env_action       : action the agent actually executed
-      reference_action : deterministic optimum under the algorithm's criterion
+      reference_action : stochastic policy reference under each algorithm's criterion
+                         (argmax probs for EUPG; argmax logits for PPO both paths;
+                          argmax Q for Envelope/DQN)
       alt_action       : contrast action used in the explanation
       match            : whether env_action == reference_action
+                         (structurally low for EUPG/PPO due to stochastic sampling)
     """
     entry = {
         "step":             step_counter,

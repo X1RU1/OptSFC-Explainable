@@ -19,6 +19,7 @@ from .short_space_dict import observation_dictionary, space_init, obs_init, rewa
 from .short_simulated_testbed import is_action_possible, get_new_simulated_observation, perform_action, get_rewards, one_step_duration, update_mtd_constraints, is_mtd_budget_zero, get_rewards_multiple_null_steps
 from .rdx import reward_difference_explanation, _build_log_entry
 from optsfc.envs.ppo.critic import PPOQNet, PPOQTrainer
+from optsfc.envs.eupg.decomposed_critic import DecomposedQNet, DecomposedQTrainer
 
 import copy
 
@@ -386,14 +387,24 @@ class MOfiveG_net(gym.Env):
                 import traceback; traceback.print_exc()
         
         if getattr(self, "critic_trainer", None) is not None:
-            # PPO: scalar reward
-            self.critic_trainer.store(
+            if isinstance(self.critic_trainer, DecomposedQTrainer):
+                # EUPG: per-objective reward vector
+                self.critic_trainer.store(
+                    obs_before_step,
+                    action,
+                    np.array(self.reward_noScalar, dtype=np.float32),
+                    dict_observation_to_array(self.observation),
+                    done
+                )
+            else:
+                # PPO: scalar reward
+                self.critic_trainer.store(
                     obs_before_step,
                     action,
                     float(info["rew"]),
                     dict_observation_to_array(self.observation),
                     done
-                )              
+                )
             self.critic_trainer.update()
 
         if self.non_MORL:
