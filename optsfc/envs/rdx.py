@@ -13,7 +13,9 @@ def _detect_algo(model) -> str:
         return "EUPG"
     if hasattr(model, "policy") and hasattr(model.policy, "q_net"):
         return "DQN"
-    if "PPO" in name or "A2C" in name:
+    if "A2C" in name:
+        return "A2C"
+    if "PPO" in name:
         return type(model).__name__
     return "Unknown"
 
@@ -31,8 +33,7 @@ def _get_q_values(model, obs_np, weights_arr, algo, env=None):
                                         DecomposedQNet is not available)
       "Scalar"          (n_actions,)    DQN scalar Q
       "PPO_Q"           (n_actions,)    PPO TD-trained scalar Q
-      "PPO_advantage"   (n_actions,)    PPO logit-based heuristic (fallback
-                                        when PPOQNet is not available)
+      "A2C_Q"           (n_actions,)    A2C TD-trained scalar Q
 
     aux per algorithm:
       Envelope        : {}
@@ -45,9 +46,11 @@ def _get_q_values(model, obs_np, weights_arr, algo, env=None):
       PPO (QNet)      : {"q_vals": (n_actions,), "logits": (n_actions,)}
                         raw Q values and policy logits; reference_action
                         uses argmax(logits) to reflect PPO's stochastic
-                        policy intent, consistent with the fallback path
-      PPO (fallback)  : {"logits": (n_actions,)} raw policy logits;
-                        reference_action uses argmax(logits)
+                        policy intent
+      A2C (A2CQNet)    : {"q_vals": (n_actions,), "logits": (n_actions,)}
+                        raw Q values and policy logits; reference_action
+                        uses argmax(logits) to reflect A2C's stochastic
+                        policy intent
     """
     obs_t = torch.tensor(obs_np, dtype=torch.float32)
     if obs_t.ndim == 1:
@@ -92,35 +95,41 @@ def _get_q_values(model, obs_np, weights_arr, algo, env=None):
         with torch.no_grad():
             q = model.policy.q_net(obs_t).cpu().numpy().squeeze()
         return q.astype(np.float32), "Scalar", {}
+    
+    elif algo == "A2C":
+        a2c_q_net = getattr(model, "a2c_q_net", None)
+        # TD-trained Q(s,a) for all actions, using A2C's own transitions.
+        # reference_action = argmax(logits), consistent with A2C's stochastic
+        # policy intent: the independently trained Q network estimates a greedy
+        # policy different from A2C's own stochastic policy, so logits better
+        # reflect A2C's actual decision criterion. Q values are retained in aux
+        # for delta computation in the explanation.
+        with torch.no_grad():
+            q_vals = a2c_q_net(obs_t).squeeze(0).cpu().numpy()  # (n_actions,)
+            dist   = model.policy.get_distribution(obs_t)
+            logits = dist.distribution.logits.squeeze().cpu().numpy()
+        return q_vals.astype(np.float32), "A2C_Q", {
+            "q_vals": q_vals.astype(np.float32),
+            "logits": logits.astype(np.float32),
+        }
 
-    else:  # PPO / A2C
+    else:  # PPO 
         ppo_q_net = getattr(model, "ppo_q_net", None)
-        if ppo_q_net is not None:
-            # TD-trained Q(s,a) for all actions, using PPO's own transitions.
-            # reference_action = argmax(logits), consistent with PPO's stochastic
-            # policy intent: the independently trained Q network estimates a greedy
-            # policy different from PPO's own stochastic policy, so logits better
-            # reflect PPO's actual decision criterion. Q values are retained in aux
-            # for delta computation in the explanation.
-            with torch.no_grad():
-                q_vals = ppo_q_net(obs_t).squeeze(0).cpu().numpy()  # (n_actions,)
-                dist   = model.policy.get_distribution(obs_t)
-                logits = dist.distribution.logits.squeeze().cpu().numpy()
-            return q_vals.astype(np.float32), "PPO_Q", {
-                "q_vals": q_vals.astype(np.float32),
-                "logits": logits.astype(np.float32),
-            }
-        else:
-            # Fallback: raw policy logits as a heuristic proxy.
-            # logits[a] > logits[b] implies pi(a|s) > pi(b|s) but does not
-            # reflect action values. Acceptable as a last resort per-action
-            # ranking only.
-            with torch.no_grad():
-                dist   = model.policy.get_distribution(obs_t)
-                logits = dist.distribution.logits.squeeze().cpu().numpy()
-            return logits.astype(np.float32), "PPO_advantage", {"logits": logits.astype(np.float32)}
-
-
+        # TD-trained Q(s,a) for all actions, using PPO's own transitions.
+        # reference_action = argmax(logits), consistent with PPO's stochastic
+        # policy intent: the independently trained Q network estimates a greedy
+        # policy different from PPO's own stochastic policy, so logits better
+        # reflect PPO's actual decision criterion. Q values are retained in aux
+        # for delta computation in the explanation.
+        with torch.no_grad():
+            q_vals = ppo_q_net(obs_t).squeeze(0).cpu().numpy()  # (n_actions,)
+            dist   = model.policy.get_distribution(obs_t)
+            logits = dist.distribution.logits.squeeze().cpu().numpy()
+        return q_vals.astype(np.float32), "PPO_Q", {
+            "q_vals": q_vals.astype(np.float32),
+            "logits": logits.astype(np.float32),
+        }
+        
 # Deterministic at inference: mismatch implies exploration or non-convergence.
 _DETERMINISTIC_ALGOS = {"Envelope", "DQN"}
 
@@ -145,7 +154,6 @@ def _select_actions(q_values, weights_arr, q_type, algo, env_action=None, aux=No
       PPO with PPOQNet         -> argmax(logits)  [stochastic policy reference;
                                   PPOQNet uses a greedy TD target that estimates
                                   a different policy than PPO's own stochastic one]
-      PPO fallback             -> argmax(logits)
 
     alt_action:
       reference_action != best_action -> alt = reference_action
@@ -177,11 +185,10 @@ def _select_actions(q_values, weights_arr, q_type, algo, env_action=None, aux=No
         # policy, making probs the more faithful reference criterion.
         reference_action = int(np.argmax(aux["probs"]))
     elif algo in _STOCHASTIC_ALGOS and "logits" in aux:
-        # Both PPO paths use argmax(logits) as reference, reflecting PPO's
+        # PPO paths use argmax(logits) as reference, reflecting PPO's
         # stochastic policy intent. For the PPOQNet path, the greedy TD target
         # estimates a policy different from PPO's own stochastic policy, making
-        # logits the more faithful reference criterion. The fallback path uses
-        # logits directly as the only available proxy.
+        # logits the more faithful reference criterion. 
         reference_action = int(np.argmax(aux["logits"]))
     else:
         # Deterministic paths (Envelope, DQN): greedy argmax on scalar_q.
@@ -328,12 +335,15 @@ def _build_scalar_summary(best_action, alt_action, reference_action,
             "stochastic policy sampling. "
             "Reward decomposition not applicable.]"
         )
-    elif q_type == "PPO_advantage":
-        metric    = "logit-based heuristic"
+    elif q_type == "A2C_Q":
+        metric    = "TD-trained Q-value"
         ref_label = f"highest-logit action (action {reference_action})"
         algo_note = (
-            "[PPO fallback: raw logits used as heuristic proxy for action "
-            "preference. Not a true Q-value estimate. "
+            "[A2C: Q(s,a) trained via TD on A2C's own transitions. "
+            "reference_action = argmax(logits) to reflect A2C's stochastic "
+            "policy intent; A2CQNet's greedy TD target estimates a policy "
+            "different from A2C's own. Match rate is structurally low due to "
+            "stochastic policy sampling. "
             "Reward decomposition not applicable.]"
         )
     else:  # Scalar (DQN)

@@ -397,7 +397,7 @@ class MOfiveG_net(gym.Env):
                     done
                 )
             else:
-                # PPO: scalar reward
+                # PPO / A2C: scalar reward
                 self.critic_trainer.store(
                     obs_before_step,
                     action,
@@ -574,11 +574,19 @@ def train(agent_type, policy, total_timesteps, model_name, log_dir, budget_reset
     
     env_train.env.model_for_explain = model
 
-    obs_dim  = env_train.env.observation_space.shape[0]
-    ppo_q    = PPOQNet(obs_dim=obs_dim, n_actions=env_train.env.n_actions)
-    ppo_q_trainer = PPOQTrainer(ppo_q, gamma=0.99)
-    model.ppo_q_net     = ppo_q
-    env_train.env.critic_trainer = ppo_q_trainer
+    obs_dim = env_train.env.observation_space.shape[0]
+
+    if agent_type == "PPO":
+        ppo_q         = PPOQNet(obs_dim=obs_dim, n_actions=env_train.env.n_actions)
+        ppo_q_trainer = PPOQTrainer(ppo_q, gamma=0.99)
+        model.ppo_q_net              = ppo_q
+        env_train.env.critic_trainer = ppo_q_trainer
+
+    elif agent_type == "A2C":
+        a2c_q         = PPOQNet(obs_dim=obs_dim, n_actions=env_train.env.n_actions)
+        a2c_q_trainer = PPOQTrainer(a2c_q, gamma=0.99)
+        model.a2c_q_net              = a2c_q
+        env_train.env.critic_trainer = a2c_q_trainer
 
     with open(log_dir+'Log'+model_name+'.txt','a') as f:
         with contextlib.redirect_stdout(f):
