@@ -19,9 +19,26 @@ Delta semantics (IMPORTANT):
   These two quantities have DIFFERENT meanings, so they are
   NEVER mixed in the same plot or summary statistic.
 
+§6 – Single-Step RDX Case Study  (MORL only)
+─────────────────────────────────────────────
+Objective-level bar chart showing the per-objective weighted Q-value difference
+that justifies why the agent preferred one action over another at a single state.
+
+Step selection strategy (MORL algorithms only):
+  Auto: from match=True rows only, select the step whose TOTAL absolute weighted
+        Q-diff magnitude (sum of |per-objective diffs|) is largest.
+        This picks the step where the agent's preference is most decisively
+        and positively expressed across all three objectives simultaneously.
+  Manual: set SINGLE_STEP_OVERRIDE  e.g. {"Envelope": 1234, "EUPG": 500}
+
+The chosen step is also overlaid as a ○ hollow circle in the pairwise scatter plot
+(§3d) so both plots reference the same state.
+
 Usage:
-  Edit the CSV_FILES dict below, then run:
-      python evaluate_all_algorithms.py
+  1. Edit CSV_FILES dict below.
+  2. (Optional) set SINGLE_STEP_OVERRIDE to pin a specific "step" column value
+     for Envelope and/or EUPG; set to None to use auto-selection.
+  3. Run:  python evaluate_all_algorithms.py
 
 Outputs:
   - Per-algorithm plots  (PDF in OUTPUT_DIR)
@@ -45,6 +62,15 @@ CSV_FILES = {
     "PPO":      "ppo_explain.csv",
 }
 
+# ── Single-Step RDX override (MORL algorithms only) ──────────────────────────
+# Set to an integer "step" column VALUE (not row index) to pin a specific step.
+# Leave as None to auto-select: from match=True rows, the step with the largest
+# total weighted Q-diff sum (Resource + Network + Security) is chosen.
+SINGLE_STEP_OVERRIDE: dict[str, int | None] = {
+    "Envelope": None,
+    "EUPG":     None,
+}
+
 WEIGHTS     = np.array([0.4, 0.3, 0.3])
 OBJ_NAMES   = ["Resource", "Network", "Security"]
 COLORS_OBJ  = {"Resource": "steelblue", "Network": "darkorange", "Security": "green"}
@@ -64,6 +90,12 @@ WINDOW_FRAC = 0.02   # rolling window as fraction of total steps
 
 MORL_ALGOS   = {"Envelope", "EUPG"}
 SCALAR_ALGOS = {"A2C", "DQN", "PPO"}
+
+MORL_DIFF_COLS = [
+    "weighted_resource_diff",
+    "weighted_network_diff",
+    "weighted_security_diff",
+]
 
 def is_morl(algo: str) -> bool:
     return algo in MORL_ALGOS
@@ -88,7 +120,6 @@ def split_by_match(df: pd.DataFrame):
         delta = Q(env_action) - Q(best) <=0, measures execution cost
     """
     if "match" not in df.columns:
-        # Infer match from action columns if possible
         if "env_action" in df.columns and "reference_action" in df.columns:
             df = df.copy()
             df["match"] = (df["env_action"] == df["reference_action"])
@@ -97,6 +128,55 @@ def split_by_match(df: pd.DataFrame):
     adv  = df[df["match"] == True].copy()
     regr = df[df["match"] == False].copy()
     return adv, regr
+
+
+def select_highlight_step(algo: str, df: pd.DataFrame) -> pd.Series | None:
+    """
+    Return a single row (Series) for the Single-Step RDX case study.
+    Only defined for MORL algorithms; returns None for scalar algorithms.
+
+    Selection logic
+    ───────────────
+    1. SINGLE_STEP_OVERRIDE[algo] is not None
+           → find the row whose “step” column equals that value.
+    2. Auto (default):
+           Restrict to match=True rows (advantage regime only).
+           Among those, pick the row with the LARGEST total weighted Q-diff
+           sum  (weighted_resource_diff + weighted_network_diff +
+                 weighted_security_diff)  — NOT the largest absolute value.
+           This identifies the step where the agent’s preference is most
+           decisively and positively expressed across all objectives.
+
+    Returns None if:
+      - algo is not MORL, or
+      - required diff columns are absent, or
+      - no match=True rows exist.
+    """
+    if not is_morl(algo):
+        return None
+
+    available = [c for c in MORL_DIFF_COLS if c in df.columns]
+    if not available:
+        return None
+
+    # ── manual override by “step” value ────────────────────────────────────────────
+    pin = SINGLE_STEP_OVERRIDE.get(algo)
+    if pin is not None:
+        matched = df[df["step"] == pin]
+        if not matched.empty:
+            return matched.iloc[0]
+        print(f"  [!] SINGLE_STEP_OVERRIDE[{algo}]={pin}: "
+              f"no row with step=={pin}, falling back to auto-selection.")
+
+    # ── auto-selection: match=True rows, max total weighted Q-diff sum ────────
+    adv, _ = split_by_match(df)
+    if adv.empty:
+        print(f"  [!] {algo}: no match=True rows found for single-step selection.")
+        return None
+
+    score = adv[available].abs().sum(axis=1)  # max absolute weighted Q-diff magnitude
+    return adv.loc[score.idxmax()]
+
 
 # ── 2. LOAD DATA ──────────────────────────────────────────────────────────────
 
@@ -111,6 +191,11 @@ for algo, path in CSV_FILES.items():
 
 if not dfs:
     raise RuntimeError("No CSV files loaded. Check CSV_FILES paths.")
+
+# Pre-compute highlight steps for all loaded algorithms
+highlight_steps: dict[str, pd.Series | None] = {
+    algo: select_highlight_step(algo, df) for algo, df in dfs.items()
+}
 
 # ── 3. PER-ALGORITHM PLOTS ────────────────────────────────────────────────────
 
@@ -161,12 +246,6 @@ def plot_action_distribution(algo: str, df: pd.DataFrame):
 # ── 3b. Scalar delta — split into advantage & regret ─────────────────────────
 
 def plot_scalar_delta_split(algo: str, df: pd.DataFrame):
-    """
-    Two subplots side-by-side:
-      Left  – Advantage (match=True):  rolling mean of delta (>=0)
-      Right – Regret    (match=False): rolling mean of delta (<=0)
-    Each subplot also shows a ±1-std band and a step-count subtitle.
-    """
     if "delta" not in df.columns:
         return
 
@@ -215,19 +294,7 @@ def plot_scalar_delta_split(algo: str, df: pd.DataFrame):
 
 # ── 3c. MORL delta — split into advantage & regret ───────────────────────────
 
-MORL_DIFF_COLS = [
-    "weighted_resource_diff",
-    "weighted_network_diff",
-    "weighted_security_diff",
-]
-
 def plot_morl_delta_split(algo: str, df: pd.DataFrame):
-    """
-    Two rows × 3 columns:
-      Top row    – Advantage (match=True)
-      Bottom row – Regret    (match=False)
-    Each cell = one objective's rolling mean delta.
-    """
     available = [c for c in MORL_DIFF_COLS if c in df.columns]
     if not available:
         return
@@ -277,12 +344,19 @@ def plot_morl_delta_split(algo: str, df: pd.DataFrame):
     print(f"  → {out}")
 
 
-# ── 3d. MORL pairwise scatter — split ────────────────────────────────────────
+# ── 3d. MORL pairwise scatter — split + highlight point (§6) ─────────────────
 
-def plot_morl_pairwise_split(algo: str, df: pd.DataFrame):
+def plot_morl_pairwise_split(algo: str, df: pd.DataFrame,
+                              highlight: pd.Series | None = None):
     """
     Pairwise scatter for MORL objectives.
-    Left column = Advantage (match=True), Right column = Regret (match=False).
+    Left column  = Advantage (match=True)
+    Right column = Regret    (match=False)
+
+    §6 – If `highlight` (a single-row Series) is provided, its position is
+    overlaid on every scatter panel as a gold star with a labelled annotation.
+    This visually connects the Single-Step RDX bar chart to the overall
+    pairwise distribution.
     """
     pairs = [
         ("weighted_resource_diff", "weighted_network_diff",  "W-Resource", "W-Network"),
@@ -303,8 +377,11 @@ def plot_morl_pairwise_split(algo: str, df: pd.DataFrame):
     fig, axes = plt.subplots(n_pairs, 2, figsize=(10, 4 * n_pairs))
     if n_pairs == 1:
         axes = axes[np.newaxis, :]
-    fig.suptitle(f"{algo} – Pairwise Objective Scatter Split by Match Status",
-                 fontsize=13, fontweight="bold")
+    fig.suptitle(
+        f"{algo} – Pairwise Objective Scatter Split by Match Status\n"
+        f"○ = Single-Step RDX highlight (step {int(highlight['step']) if highlight is not None else '—'})",
+        fontsize=12, fontweight="bold"
+    )
 
     col_titles = [
         "Advantage  (env == ref)",
@@ -313,6 +390,8 @@ def plot_morl_pairwise_split(algo: str, df: pd.DataFrame):
     for col_idx, (subset, ct) in enumerate(zip([adv, regr], col_titles)):
         for row_idx, (xcol, ycol, xlabel, ylabel) in enumerate(pairs):
             ax = axes[row_idx][col_idx]
+
+            # ── background scatter ──────────────────────────────────────────
             if subset.empty:
                 ax.text(0.5, 0.5, "No data", transform=ax.transAxes,
                         ha="center", va="center", color="gray")
@@ -320,6 +399,27 @@ def plot_morl_pairwise_split(algo: str, df: pd.DataFrame):
                 pcolors = [acolor.get(a, "gray") for a in subset["reference_action"]]
                 ax.scatter(subset[xcol], subset[ycol],
                            c=pcolors, alpha=0.5, s=15, edgecolors="none")
+
+            # ── §6 highlight point (Advantage panel only) ───────────────────
+            # The highlight step is always selected from match=True rows, so
+            # drawing it in the Regret panel (col_idx==1) would be misleading.
+            if col_idx == 0 and highlight is not None \
+                    and xcol in highlight.index and ycol in highlight.index:
+                hx = highlight[xcol]
+                hy = highlight[ycol]
+                ax.scatter(hx, hy,
+                           marker="o", s=120, facecolors="none",
+                           edgecolors="black", linewidths=1.8,
+                           zorder=10)
+                ax.annotate(
+                    f"  step {int(highlight['step'])}",
+                    xy=(hx, hy),
+                    fontsize=7, color="black",
+                    xytext=(6, 6), textcoords="offset points",
+                    arrowprops=dict(arrowstyle="-", color="black", lw=0.6),
+                    zorder=11,
+                )
+
             ax.axhline(0, color="black", linewidth=0.6, linestyle="--")
             ax.axvline(0, color="black", linewidth=0.6, linestyle="--")
             ax.set_xlabel(xlabel, fontsize=8)
@@ -327,10 +427,19 @@ def plot_morl_pairwise_split(algo: str, df: pd.DataFrame):
             ax.grid(True, alpha=0.3)
             if row_idx == 0:
                 ax.set_title(ct, fontsize=10, fontweight="bold")
+            if highlight is not None:
+                ax.legend(fontsize=7, loc="upper right")
 
     legend_handles = [Patch(facecolor=acolor[a], label=f"Action {a}")
                       for a in unique_actions]
-    fig.legend(handles=legend_handles, title="Best Action ID",
+    # Add highlight marker to legend
+    from matplotlib.lines import Line2D
+    legend_handles.append(
+        Line2D([0], [0], marker="o", color="w", markerfacecolor="none",
+               markeredgecolor="black", markersize=8, markeredgewidth=1.8,
+               label="Single-Step RDX highlight")
+    )
+    fig.legend(handles=legend_handles, title="Best Action ID / Highlight",
                bbox_to_anchor=(1.01, 0.5), loc="center left",
                fontsize=7, title_fontsize=8, framealpha=0.8)
     fig.tight_layout(rect=[0, 0, 0.88, 1])
@@ -343,12 +452,6 @@ def plot_morl_pairwise_split(algo: str, df: pd.DataFrame):
 # ── 3e. Cumulative delta — split ──────────────────────────────────────────────
 
 def plot_cumulative_delta_split(algo: str, df: pd.DataFrame):
-    """
-    Two subplots:
-      Left  – cumulative advantage delta  (match=True rows)
-      Right – cumulative regret delta     (match=False rows)
-    MORL: one line per objective.  Scalar: single line.
-    """
     adv, regr = split_by_match(df)
 
     fig, axes = plt.subplots(1, 2, figsize=(13, 4))
@@ -416,17 +519,116 @@ def plot_action_entropy_if_available(algo: str, df: pd.DataFrame):
     print(f"  → {out}")
 
 
+# ── 3g / §6. Single-Step RDX Case Study (MORL only) ────────────────────────────────
+#
+# Objective-level bar chart showing the per-objective weighted Q-value
+# difference that justifies the agent’s action preference at one state.
+#
+# Step selection: match=True rows only; row with largest TOTAL ABSOLUTE
+# weighted Q-diff magnitude (|Resource| + |Network| + |Security|).  Manual override available
+# via SINGLE_STEP_OVERRIDE in the configuration section.
+#
+# The same step is marked ★ in the pairwise scatter plot (§3d) so both
+# plots reference the same state.
+# ──────────────────────────────────────────────────────────────────────────────
+
+def plot_single_step_rdx(algo: str, highlight: pd.Series | None):
+    """
+    MORL only. Bar chart for a single highlighted step.
+
+    Three bars, one per weighted objective diff:
+      Green bar = positive diff  (agent gains on this objective)
+      Red   bar = negative diff  (agent loses on this objective)
+
+    The highlighted step is always from the match=True (advantage) regime,
+    so the overall picture should skew positive.
+    """
+    if not is_morl(algo):
+        return   # silently skip scalar algorithms
+
+    if highlight is None:
+        print(f"  [!] {algo}: skipping single-step RDX (no suitable row found).")
+        return
+
+    step_id = int(highlight.get("step", -1))
+
+    h_match    = bool(highlight.get("match", True))
+    match_sym  = "✓" if h_match else "✗"
+    match_type = "Advantage (env==ref)" if h_match else "Regret (env≠ref)"
+
+    env_action  = highlight.get("env_action", "?")
+    ref_action  = highlight.get("reference_action", highlight.get("best_action", "?"))
+    best_action = highlight.get("best_action", ref_action)
+    alt_action  = highlight.get("alt_action", "?")
+
+    available = [c for c in MORL_DIFF_COLS if c in highlight.index]
+    if not available:
+        print(f"  [!] {algo}: MORL diff columns missing, skipping single-step RDX.")
+        return
+
+    labels = [n for c, n in zip(MORL_DIFF_COLS, OBJ_NAMES) if c in highlight.index]
+    deltas = [float(highlight[c]) for c in available]
+    colors = ["green" if d > 0 else "red" for d in deltas]
+
+    fig, ax = plt.subplots(figsize=(7, 4))
+    bars = ax.bar(labels, deltas, color=colors, alpha=0.8,
+                  edgecolor="black", linewidth=0.8)
+
+    max_abs = max(abs(v) for v in deltas) if deltas else 1.0
+    offset  = 0.03 * max_abs
+    ymin, ymax = ax.get_ylim()
+    y_range = ymax - ymin
+    offset = 0.001 * y_range 
+
+    for bar, val in zip(bars, deltas):
+        ax.text(
+            bar.get_x() + bar.get_width() / 2,
+            val + (offset if val >= 0 else -offset),
+            f"{val:.4f}",
+            ha="center",
+            va="bottom" if val >= 0 else "top",
+            fontsize=10,
+            fontweight="bold",
+        )
+
+    ax.axhline(0, color="black", linewidth=0.8, linestyle="--")
+    ax.set_ylabel("Weighted Q-value Difference  (w · ΔQ)", fontsize=9)
+    ax.set_title(
+        f"{algo} – Single-Step RDX at Step {step_id}  [{match_type}  {match_sym}]\n"
+        f"Best Action {best_action}  vs  Alt Action {alt_action}  "
+        f"(env_action={env_action})",
+        fontsize=10, fontweight="bold",
+    )
+    ax.grid(True, alpha=0.3, axis="y")
+    fig.tight_layout()
+
+    out = os.path.join(OUTPUT_DIR, f"{algo}_single_step_rdx.pdf")
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  → {out}  (step={step_id}, match={h_match})")
+
+
+# ── Run all per-algorithm plots ───────────────────────────────────────────────
+
 print("\n── Per-algorithm plots ──")
 for algo, df in dfs.items():
     print(f"\n[{algo}]")
+    hl = highlight_steps[algo]
+
     plot_action_distribution(algo, df)
+
     if is_morl(algo):
         plot_morl_delta_split(algo, df)
-        plot_morl_pairwise_split(algo, df)
+        # §3d + §6: pairwise scatter WITH highlight star
+        plot_morl_pairwise_split(algo, df, highlight=hl)
     else:
         plot_scalar_delta_split(algo, df)
+
     plot_cumulative_delta_split(algo, df)
     plot_action_entropy_if_available(algo, df)
+
+    # §3g / §6: Single-Step RDX bar chart
+    plot_single_step_rdx(algo, highlight=hl)
 
 
 # ── 4. CROSS-ALGORITHM COMPARISON ────────────────────────────────────────────
@@ -557,21 +759,13 @@ if len(dfs) >= 2:
 
 
 # ── 5. SUMMARY TABLE ──────────────────────────────────────────────────────────
-#
-# For each algorithm we report:
-#   Match Rate          : % steps where env_action == reference_action
-#   Advantage Mean Δ    : mean delta on match=True rows  (>=0, decisiveness)
-#   Regret    Mean Δ    : mean delta on match=False rows (<=0, execution cost)
-#
-# For MORL: Advantage/Regret are reported PER objective (weighted).
-# These two columns are NEVER averaged together.
-# ──────────────────────────────────────────────────────────────────────────────
 
 print("\n── Summary Table ──")
 rows = []
 for algo, df in dfs.items():
     adv, regr = split_by_match(df)
     total = len(df)
+    hl    = highlight_steps[algo]
 
     row = {
         "Algorithm":         algo,
@@ -579,6 +773,7 @@ for algo, df in dfs.items():
         "Match Rate (%)":    f"{df['match'].mean()*100:.1f}" if "match" in df.columns else "N/A",
         "Adv Steps":         len(adv),
         "Regret Steps":      len(regr),
+        "Highlight Step":    int(hl["step"]) if hl is not None else "—",
     }
 
     if is_morl(algo):
@@ -591,10 +786,14 @@ for algo, df in dfs.items():
             row[f"Regret Mean W-{name}Δ"] = (
                 f"{regr[col].mean():.4f}" if not regr.empty else "—"
             )
+            if hl is not None and col in hl.index:
+                row[f"Highlight W-{name}Δ"] = f"{hl[col]:.4f}"
     else:
         if "delta" in df.columns:
             row["Adv Mean Q-Δ"]    = f"{adv['delta'].mean():.4f}"  if not adv.empty  else "—"
             row["Regret Mean Q-Δ"] = f"{regr['delta'].mean():.4f}" if not regr.empty else "—"
+            if hl is not None and "delta" in hl.index:
+                row["Highlight Q-Δ"] = f"{hl['delta']:.4f}"
 
     rows.append(row)
 
