@@ -605,44 +605,52 @@ def reward_difference_explanation(model, obs, weights=None, env_action=None, env
 
     # ── MORL: Envelope / EUPG ─────────────────────────────────────────────────
     if q_type in ("MORL_vec", "EUPG_decomposed"):
-        best_q = q_values[best_action]
-        alt_q  = q_values[alt_action]
-        delta  = best_q - alt_q
+        best_q = q_values[best_action]   # np.ndarray (3,) — local only
+        alt_q  = q_values[alt_action]    # np.ndarray (3,) — local only
+        delta  = best_q - alt_q          # np.ndarray (3,) — local only
 
         summary, improved, degraded = _build_morl_summary(
             best_action, alt_action, reference_action,
             delta, weights_arr, q_type, algo, match
         )
 
-        detail_lines = [
-            f"{name}: {'up' if delta[i] > 0 else 'down'} "
-            f"{abs(delta[i]):.3f} raw "
-            f"(weighted: {delta[i] * weights_arr[i]:+.3f})"
-            for i, name in enumerate(OBJ_NAMES)
-        ]
-
+        # IMPORTANT — no numpy arrays in this dict.
+        # This dict is stored in info["explanation"] inside env.step(), which
+        # means it flows through SB3 callbacks and is reachable by torch.save()
+        # when Envelope calls agent.save().  Any numpy array here will be
+        # pickled into memory, causing MemoryError on long runs.
+        #
+        # The full per-action Q table (needed for the q_a{i}_* CSV columns) is
+        # extracted separately in env.step() via _get_all_actions_q_columns(),
+        # which is called *after* reward_difference_explanation() returns and
+        # writes directly into the log entry — it never enters info at all.
         result = {
             "type":               "MORL_RDX",
             "algo":               algo,
             "q_type":             q_type,
-            "env_action":         env_action,
-            "reference_action":   reference_action,
-            "alternative_action": alt_action,
+            "env_action":         int(env_action) if env_action is not None
+                                  else None,
+            "reference_action":   int(reference_action),
+            "alternative_action": int(alt_action),
             "match":              match,
             "summary":            summary,
-            "best_q_vector":      best_q,
-            "alt_q_vector":       alt_q,
-            "best_weighted_q":    best_q * weights_arr,
-            "alt_weighted_q":     alt_q  * weights_arr,
-            "delta_vector":       delta,
-            "weighted_delta":     delta  * weights_arr,
-            "overall_advantage":  float(np.dot(delta, weights_arr)),
-            "improved":           improved,
-            "degraded":           degraded,
-            "details":            detail_lines,
+            # Chosen-vs-alt weighted Q differences — Python floats only.
+            "best_weighted_q_resource": float(best_q[0] * weights_arr[0]),
+            "best_weighted_q_network":  float(best_q[1] * weights_arr[1]),
+            "best_weighted_q_security": float(best_q[2] * weights_arr[2]),
+            "alt_weighted_q_resource":  float(alt_q[0]  * weights_arr[0]),
+            "alt_weighted_q_network":   float(alt_q[1]  * weights_arr[1]),
+            "alt_weighted_q_security":  float(alt_q[2]  * weights_arr[2]),
+            "weighted_delta_resource":  float(delta[0]  * weights_arr[0]),
+            "weighted_delta_network":   float(delta[1]  * weights_arr[1]),
+            "weighted_delta_security":  float(delta[2]  * weights_arr[2]),
+            "overall_advantage":        float(np.dot(delta, weights_arr)),
+            "improved":                 improved,   # list[str] — pickle-safe
+            "degraded":                 degraded,   # list[str] — pickle-safe
         }
+        # EUPG policy distribution: convert numpy array → list[float].
         if "probs" in aux:
-            result["action_probs"] = aux["probs"]
+            result["action_probs"] = [float(p) for p in aux["probs"]]
         return result
 
     # ── DQN ───────────────────────────────────────────────────────────────────
@@ -691,7 +699,7 @@ def reward_difference_explanation(model, obs, weights=None, env_action=None, env
 # ── Log entry builder ─────────────────────────────────────────────────────────
 
 def _build_log_entry(step_counter, action, explanation,
-                     obs_array=None, env=None):
+                     obs_array=None, env=None, reward_noScalar=None):
     """
     Build a flat dict suitable for CSV export via pd.DataFrame.
 
@@ -713,18 +721,32 @@ def _build_log_entry(step_counter, action, explanation,
         Live environment instance needed by extract_state_features() to read
         temporal trackers (last_mtd_step, security_penalty_cumul).
         Must be provided together with obs_array; ignored if obs_array is None.
+    reward_noScalar : list[float] or None
+        Three-element per-objective reward received at this step, in the order
+        [resource, network, security].  Each component equals the corresponding
+        objective reward plus final_reward (which encodes action validity:
+        0 for a valid MTD action, -10 for the null action, -20 for an invalid
+        action).  Written as "reward_resource", "reward_network",
+        "reward_security" columns so every algorithm row carries the same
+        ground-truth reward signal regardless of whether it is MORL or scalar.
+        Pass None to omit these columns (backward-compatible with old logs).
 
     Column groups in the returned dict
     ───────────────────────────────────
-    Metadata       : step, algo, q_type, exp_type
-    Actions        : env_action, reference_action, alt_action, match
-    Summary        : summary (human-readable text)
-    MORL Q-diffs   : weighted_{resource,network,security}_diff,
-                     best_weighted_q_{resource,network,security},
-                     alt_weighted_q_{resource,network,security}
-    EUPG policy    : prob_action_<i>, max_prob, max_prob_action, policy_entropy
-    Scalar Q       : best_q, alt_q, delta          (DQN / PPO / A2C)
-    State features : feat_*  (only when obs_array and env are both provided)
+    Metadata         : step, algo, q_type, exp_type
+    Actions          : env_action, reference_action, alt_action, match
+    Summary          : summary (human-readable text)
+    Per-obj rewards  : reward_resource, reward_network, reward_security
+                       (all algorithms; present when reward_noScalar is given)
+    MORL Q-diffs     : weighted_{resource,network,security}_diff,
+                       best_weighted_q_{resource,network,security},
+                       alt_weighted_q_{resource,network,security}
+    MORL full table  : q_a{i}_resource, q_a{i}_network, q_a{i}_security,
+                       scalar_q_a{i}  for i in 0..n_actions-1
+                       (11×3 raw Q columns + 11 scalarised Q columns = 44 cols)
+    EUPG policy      : prob_action_<i>, max_prob, max_prob_action, policy_entropy
+    Scalar Q         : best_q, alt_q, delta          (DQN / PPO / A2C)
+    State features   : feat_*  (all algorithms; present when obs_array+env given)
     """
     entry = {
         "step":             step_counter,
@@ -738,29 +760,50 @@ def _build_log_entry(step_counter, action, explanation,
         "summary":          explanation["summary"],
     }
 
+    # ── Per-objective step reward (all algorithms) ────────────────────────────
+    # Placed immediately after the action columns so that reward_resource /
+    # reward_network / reward_security appear before the algorithm-specific
+    # Q-value columns in every CSV, making cross-algorithm comparison easier.
+    # Each value = objective_reward + final_reward, where final_reward is:
+    #   0   valid MTD action executed
+    #  -10  null action (action == 0)
+    #  -20  invalid action rejected by is_action_possible()
+    if reward_noScalar is not None:
+        entry["reward_resource"] = float(reward_noScalar[0])
+        entry["reward_network"]  = float(reward_noScalar[1])
+        entry["reward_security"] = float(reward_noScalar[2])
+
     exp_type = explanation["type"]
 
     if exp_type == "MORL_RDX":
         entry.update({
-            "weighted_resource_diff":   explanation["weighted_delta"][0],
-            "weighted_network_diff":    explanation["weighted_delta"][1],
-            "weighted_security_diff":   explanation["weighted_delta"][2],
-            "best_weighted_q_resource": explanation["best_weighted_q"][0],
-            "best_weighted_q_network":  explanation["best_weighted_q"][1],
-            "best_weighted_q_security": explanation["best_weighted_q"][2],
-            "alt_weighted_q_resource":  explanation["alt_weighted_q"][0],
-            "alt_weighted_q_network":   explanation["alt_weighted_q"][1],
-            "alt_weighted_q_security":  explanation["alt_weighted_q"][2],
+            # Chosen-vs-alt weighted Q differences — already plain floats.
+            "weighted_resource_diff":   explanation["weighted_delta_resource"],
+            "weighted_network_diff":    explanation["weighted_delta_network"],
+            "weighted_security_diff":   explanation["weighted_delta_security"],
+            "best_weighted_q_resource": explanation["best_weighted_q_resource"],
+            "best_weighted_q_network":  explanation["best_weighted_q_network"],
+            "best_weighted_q_security": explanation["best_weighted_q_security"],
+            "alt_weighted_q_resource":  explanation["alt_weighted_q_resource"],
+            "alt_weighted_q_network":   explanation["alt_weighted_q_network"],
+            "alt_weighted_q_security":  explanation["alt_weighted_q_security"],
         })
-        # EUPG-specific policy distribution fields.
+
+        # Full per-action Q table columns are injected directly by
+        # _get_all_actions_q_columns() inside env.step() after this function
+        # returns, so they never pass through info["explanation"] and are never
+        # touched by torch.save().  Nothing to do here for those columns.
+
+        # EUPG-specific policy distribution (action_probs is list[float]).
         if "action_probs" in explanation:
-            probs = explanation["action_probs"]
+            probs = explanation["action_probs"]   # list[float]
             for i, p in enumerate(probs):
-                entry[f"prob_action_{i}"] = round(float(p), 6)
-            entry["max_prob"]        = round(float(probs.max()), 6)
-            entry["max_prob_action"] = int(probs.argmax())
+                entry[f"prob_action_{i}"] = round(p, 6)
+            max_p = max(probs)
+            entry["max_prob"]        = round(max_p, 6)
+            entry["max_prob_action"] = int(probs.index(max_p))
             entry["policy_entropy"]  = round(
-                float(-np.sum(probs * np.log(probs + 1e-8))), 6
+                -sum(p * np.log(p + 1e-8) for p in probs), 6
             )
 
     elif exp_type == "SingleObjective_RDX":
@@ -777,12 +820,85 @@ def _build_log_entry(step_counter, action, explanation,
             "delta":  explanation["delta"],
         })
 
-    # ── State features (MORL only; optional for scalar algorithms) ────────────
-    # Appended as "feat_*" columns so that the CSV remains backward-compatible:
-    # rows produced without obs_array / env simply lack these columns, which
+    # ── State features (all algorithms) ──────────────────────────────────────
+    # Appended as "feat_*" columns for every algorithm, not just MORL.
+    # Rows produced without obs_array / env simply lack these columns, which
     # pandas handles gracefully as NaN when DataFrames are concatenated.
     if obs_array is not None and env is not None:
         state_feats = extract_state_features(obs_array, env)
         entry.update(state_feats)
 
     return entry
+
+
+# ── Full per-action Q table extractor (MORL only) ─────────────────────────────
+
+def _get_all_actions_q_columns(model, obs_np: np.ndarray,
+                                weights: list) -> dict:
+    """
+    Run the MORL Q-network on obs_np and return one CSV column per action per
+    objective, plus one scalarised column per action.
+
+    This function exists solely to keep large numpy arrays OUT of
+    info["explanation"].  It must be called inside env.step() AFTER
+    reward_difference_explanation() returns, and its output is merged directly
+    into the log entry dict — it never enters info at all, and is therefore
+    never reachable by torch.save() / Envelope agent.save().
+
+    Parameters
+    ----------
+    model    : MORL model (Envelope or EUPG with decomposed_q_net)
+    obs_np   : np.ndarray — flat obs_before_step, same array fed to RDX
+    weights  : list[float] — objective weights, e.g. [0.4, 0.3, 0.3]
+
+    Returns
+    -------
+    dict with keys:
+        q_a{i}_resource, q_a{i}_network, q_a{i}_security  — raw Q per action
+        scalar_q_a{i}                                      — dot(Q_i, weights)
+    for i in 0 .. n_actions-1.
+
+    Returns an empty dict if the model is not recognised as a supported MORL
+    type (safe to call for all algorithms).
+
+    Column count: n_actions * 4  (e.g. 12 actions → 48 columns)
+
+    Example column names for 12 actions:
+        q_a0_resource, q_a0_network, q_a0_security, scalar_q_a0,
+        q_a1_resource, ..., scalar_q_a11
+    """
+    algo = _detect_algo(model)
+    if algo not in ("Envelope", "EUPG"):
+        return {}
+
+    weights_arr = np.array(weights, dtype=np.float32)
+    obs_t = torch.tensor(obs_np, dtype=torch.float32).unsqueeze(0)
+
+    try:
+        if algo == "Envelope":
+            w_t = torch.tensor(weights_arr, dtype=torch.float32).unsqueeze(0)
+            with torch.no_grad():
+                q = model.q_net(obs_t, w_t).cpu().numpy()
+            if q.ndim == 3:
+                q = q.squeeze(0)          # (n_actions, 3)
+
+        else:   # EUPG — prefer the decomposed Q-net; skip if unavailable
+            q_net = getattr(model, "decomposed_q_net", None)
+            if q_net is None:
+                return {}
+            with torch.no_grad():
+                q = q_net(obs_t).squeeze(0).cpu().numpy()  # (n_actions, 3)
+
+    except Exception:
+        return {}
+
+    # q has shape (n_actions, 3); compute scalarised Q once.
+    scalar_q = q @ weights_arr   # (n_actions,)
+
+    cols = {}
+    for a_idx, (q_vec, sq) in enumerate(zip(q, scalar_q)):
+        cols[f"q_a{a_idx}_resource"] = float(q_vec[0])
+        cols[f"q_a{a_idx}_network"]  = float(q_vec[1])
+        cols[f"q_a{a_idx}_security"] = float(q_vec[2])
+        cols[f"scalar_q_a{a_idx}"]   = float(sq)
+    return cols

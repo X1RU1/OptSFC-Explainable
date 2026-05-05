@@ -25,7 +25,8 @@ from .short_simulated_testbed import (is_action_possible,
                                       update_mtd_constraints,
                                       is_mtd_budget_zero,
                                       get_rewards_multiple_null_steps)
-from .rdx import reward_difference_explanation, _build_log_entry
+from .rdx import (reward_difference_explanation, _build_log_entry,
+                   _get_all_actions_q_columns)
 from optsfc.envs.ppo.critic import PPOQNet, PPOQTrainer
 from optsfc.envs.eupg.decomposed_critic import DecomposedQNet, DecomposedQTrainer
 
@@ -189,7 +190,7 @@ class MOfiveG_net(gym.Env):
         rewards_coeff: list[float]  scalarisation weights (must sum to 1)
         num_envs     : int  number of parallel environments (default 1)
         """
-        self.explain_log = []
+        self.explain_log   = []
 
         # ── Temporal / episodic state trackers ────────────────────────────────
         # These two attributes are read by extract_state_features() in rdx.py
@@ -438,21 +439,33 @@ class MOfiveG_net(gym.Env):
                     env_action=action,
                     env=self,
                 )
+                # Store only the explanation dict in info.  It contains no numpy
+                # arrays (all values are Python scalars or lists of str/float),
+                # so it is safe for torch.save() / Envelope agent.save().
                 info["explanation"] = explanation
-                self.explain_log.append(
-                    _build_log_entry(
-                        self.step_counter,
-                        action,
-                        explanation,
-                        # Pass obs_before_step and self so that _build_log_entry
-                        # can call extract_state_features() and append "feat_*"
-                        # columns to every CSV row.  obs_before_step is the same
-                        # array fed into the Q-network, ensuring semantic alignment
-                        # between Q-value differences and state context features.
-                        obs_array=obs_before_step,
-                        env=self,
-                    )
+
+                # Build the main CSV log entry from the explanation dict.
+                log_entry = _build_log_entry(
+                    self.step_counter,
+                    action,
+                    explanation,
+                    obs_array=obs_before_step,
+                    env=self,
+                    reward_noScalar=self.reward_noScalar,
                 )
+
+                # Append the full per-action Q table for MORL algorithms.
+                # _get_all_actions_q_columns() runs the Q-network a second time
+                # and returns {q_a{i}_resource/network/security, scalar_q_a{i}}
+                # as plain Python floats — it never touches info["explanation"],
+                # so torch.save() never sees these arrays.
+                q_cols = _get_all_actions_q_columns(
+                    self.model_for_explain, obs_before_step, self.rewards_coeff
+                )
+                log_entry.update(q_cols)
+
+                self.explain_log.append(log_entry)
+
             except Exception as e:
                 info["explanation_error"] = str(e)
                 print(f"❌ step {self.step_counter}: {e}")
