@@ -298,7 +298,7 @@ def plot_q_diff(row: pd.Series, n_act: int, algo: str,
     colors = ["#4CAF50" if d > 0 else "#F44336" for d in diffs]
 
     env_action = int(row["env_action"])
-    ref_action = int(row["reference_action"])
+    ref_action = int(row["alt_action"])
     match      = int(row.get("match", -1))
     regime     = "Advantage (env==ref)" if match == 1 else "Regret (env≠ref)"
 
@@ -420,7 +420,7 @@ def plot_pairwise_rdx(row: pd.Series, n_act: int, algo: str,
     wq       = q_mat * WEIGHTS           # shape (n_act, 3)
 
     env_action = int(row["env_action"])
-    ref_action = int(row["reference_action"])
+    ref_action = int(row["alt_action"])
     match      = int(row.get("match", -1))
     regime     = "Advantage" if match == 1 else "Regret"
 
@@ -571,12 +571,132 @@ def plot_feat_q_corr(df: pd.DataFrame, n_act: int, algo: str,
     ax.set_yticklabels(short_rows, fontsize=7)
 
     ax.set_title(
-        f"{algo}  –  Feature ↔ Q-value Correlation  (full log, {len(df):,} rows)\n"
-        f"Highlighted step context: step {step_id}",
+        f"{algo}  –  Feature ↔ Q-value Correlation  (full log, {len(df):,} rows)\n",
         fontsize=9, fontweight="bold",
     )
     fig.tight_layout()
     out = os.path.join(out_dir, f"{algo}_step{step_id}_feat_q_corr.pdf")
+    fig.savefig(out, bbox_inches="tight")
+    plt.close(fig)
+    print(f"    → {out}")
+
+
+# Envelope: Feature → Action Selection
+def plot_feat_action_corr(df: pd.DataFrame, n_act: int, algo: str,
+                         step_id: int, out_dir: str):
+    """
+    Envelope only:
+    Correlation between features and whether action i is selected (0/1).
+    """
+    if "env_action" not in df.columns:
+        print(f"  [skip] {algo}: no env_action column.")
+        return
+
+    feat_cols = [col for col, _, _ in FEAT_META if col in df.columns]
+    if not feat_cols:
+        print(f"  [skip] {algo}: no feature columns.")
+        return
+
+    # Build binary action matrix
+    action_mat = pd.DataFrame({
+        f"a{i}": (df["env_action"] == i).astype(int)
+        for i in range(n_act)
+    })
+
+    sub_feat = df[feat_cols].select_dtypes(include="number")
+    sub_feat = sub_feat.loc[:, sub_feat.std() > 0]
+    action_mat = action_mat.loc[:, action_mat.std() > 0]
+
+    if sub_feat.empty or action_mat.empty:
+        print(f"  [skip] {algo}: zero variance columns.")
+        return
+
+    corr = sub_feat.join(action_mat).corr().loc[sub_feat.columns, action_mat.columns]
+
+    # Labels
+    feat_lbl_map = {col: lbl for col, lbl, _ in FEAT_META}
+    row_labels = [feat_lbl_map.get(r, r) for r in corr.index]
+
+    fig_h = max(6, len(row_labels) * 0.35)
+    fig_w = max(8, len(corr.columns) * 0.4)
+
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+    im = ax.imshow(corr.values, cmap="coolwarm", vmin=-1, vmax=1, aspect="auto")
+    plt.colorbar(im, ax=ax, label="Correlation")
+
+    ax.set_xticks(range(len(corr.columns)))
+    ax.set_xticklabels(corr.columns, fontsize=7, rotation=45)
+    ax.set_yticks(range(len(row_labels)))
+    ax.set_yticklabels(row_labels, fontsize=7)
+
+    ax.set_title(
+        f"{algo} – Feature ↔ Action Selection (env_action == i)\n",
+        fontsize=10, fontweight="bold"
+    )
+
+    fig.tight_layout()
+    out = os.path.join(out_dir, f"{algo}_step{step_id}_feat_action_corr.pdf")
+    fig.savefig(out, bbox_inches="tight")
+    plt.close(fig)
+    print(f"    → {out}")
+
+
+# EUPG: Feature → Policy Probability
+def plot_feat_prob_corr(df: pd.DataFrame, n_act: int, algo: str,
+                       step_id: int, out_dir: str):
+    """
+    EUPG only:
+    Correlation between features and action probabilities.
+    """
+    prob_cols = [f"prob_action_{i}" for i in range(n_act)
+                 if f"prob_action_{i}" in df.columns]
+
+    if not prob_cols:
+        print(f"  [skip] {algo}: no probability columns.")
+        return
+
+    feat_cols = [col for col, _, _ in FEAT_META if col in df.columns]
+    if not feat_cols:
+        print(f"  [skip] {algo}: no feature columns.")
+        return
+
+    sub_feat = df[feat_cols].select_dtypes(include="number")
+    sub_feat = sub_feat.loc[:, sub_feat.std() > 0]
+
+    sub_prob = df[prob_cols].select_dtypes(include="number")
+    sub_prob = sub_prob.loc[:, sub_prob.std() > 0]
+
+    if sub_feat.empty or sub_prob.empty:
+        print(f"  [skip] {algo}: zero variance columns.")
+        return
+
+    corr = sub_feat.join(sub_prob).corr().loc[sub_feat.columns, sub_prob.columns]
+
+    # Labels
+    feat_lbl_map = {col: lbl for col, lbl, _ in FEAT_META}
+    row_labels = [feat_lbl_map.get(r, r) for r in corr.index]
+
+    short_cols = [c.replace("prob_action_", "a") for c in corr.columns]
+
+    fig_h = max(6, len(row_labels) * 0.35)
+    fig_w = max(8, len(short_cols) * 0.4)
+
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+    im = ax.imshow(corr.values, cmap="coolwarm", vmin=-1, vmax=1, aspect="auto")
+    plt.colorbar(im, ax=ax, label="Correlation")
+
+    ax.set_xticks(range(len(short_cols)))
+    ax.set_xticklabels(short_cols, fontsize=7, rotation=45)
+    ax.set_yticks(range(len(row_labels)))
+    ax.set_yticklabels(row_labels, fontsize=7)
+
+    ax.set_title(
+        f"{algo} – Feature ↔ Policy Probability\n",
+        fontsize=10, fontweight="bold"
+    )
+
+    fig.tight_layout()
+    out = os.path.join(out_dir, f"{algo}_step{step_id}_feat_prob_corr.pdf")
     fig.savefig(out, bbox_inches="tight")
     plt.close(fig)
     print(f"    → {out}")
@@ -808,6 +928,11 @@ def main():
         plot_state_context(row, algo, step_id, args.out)
         plot_pairwise_rdx(row, n_act, algo, step_id, args.out)
         plot_feat_q_corr(df, n_act, algo, step_id, args.out)
+        if algo == "Envelope":
+            plot_feat_action_corr(df, n_act, algo, step_id, args.out)
+
+        if algo == "EUPG":
+            plot_feat_prob_corr(df, n_act, algo, step_id, args.out)
 
     # ── Cross-algorithm regime summary ─────────────────────────────────────
     print("\n── Regime summary (advantage vs regret) ──")
