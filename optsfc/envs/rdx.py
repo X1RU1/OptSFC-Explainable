@@ -29,34 +29,24 @@ OBJ_NAMES     = ["Resource", "Network", "Security"]
 #   mtd_constraint        (7, 2)           14         119
 #   ─────────────────────────────────────────────────────────
 #   Total                                133
-#
-# apt_scores / data_leak_scores / dos_scores / undefined_scores:
-#   col 0 = cvss_score_avg   (from update_agent_obs: env[*][i][2])
-#   col 1 = cvss_asp_avg     (from update_agent_obs: env[*][i][6])
-#
-# mtd_constraint:
-#   col 0 = remaining migrations
-#   col 1 = remaining reinstantiations
-# ─────────────────────────────────────────────────────────────────────────────
 
-_N_RES  = 7   # vnfs_size + cnfs_size
-_N_VIM  = 2   # vims_size
+_N_RES  = 7
+_N_VIM  = 2
 
-# Slice constants derived from the layout table above.
 _SL_NB_RES    = slice(0,   1)
-_SL_VIM_RES   = slice(1,   7)    # reshape → (_N_VIM, 3)
+_SL_VIM_RES   = slice(1,   7)
 _SL_ID        = slice(7,  14)
-_SL_APT       = slice(14, 28)    # reshape → (_N_RES, 2)
-_SL_DATALEAK  = slice(28, 42)    # reshape → (_N_RES, 2)
-_SL_DOS       = slice(42, 56)    # reshape → (_N_RES, 2)
-_SL_UNDEF     = slice(56, 70)    # reshape → (_N_RES, 2)
-_SL_MTD_OHD   = slice(70, 77)    # per-resource MTD resource overhead
-_SL_NET_PEN   = slice(77, 84)    # per-resource network penalty
-_SL_SEC_PEN   = slice(84, 91)    # per-resource security penalty
-_SL_NB_UES    = slice(91, 98)    # per-resource connected UEs
+_SL_APT       = slice(14, 28)
+_SL_DATALEAK  = slice(28, 42)
+_SL_DOS       = slice(42, 56)
+_SL_UNDEF     = slice(56, 70)
+_SL_MTD_OHD   = slice(70, 77)
+_SL_NET_PEN   = slice(77, 84)
+_SL_SEC_PEN   = slice(84, 91)
+_SL_NB_UES    = slice(91, 98)
 _SL_VIM_HOST  = slice(98, 105)
-_SL_MTD_ACT   = slice(105, 119)  # reshape → (_N_RES, 2)
-_SL_MTD_CON   = slice(119, 133)  # reshape → (_N_RES, 2): [mig, reinst]
+_SL_MTD_ACT   = slice(105, 119)
+_SL_MTD_CON   = slice(119, 133)
 
 
 def extract_state_features(obs_array: np.ndarray, env) -> dict:
@@ -67,70 +57,41 @@ def extract_state_features(obs_array: np.ndarray, env) -> dict:
     Parameters
     ----------
     obs_array : np.ndarray
-        Flat observation produced by dict_observation_to_array() *before* the
-        current step's action was applied (i.e. obs_before_step).  This is the
-        same array fed into the Q-network, so the features are semantically
-        aligned with the Q-value differences computed by RDX.
+        Flat observation produced by dict_observation_to_array() before the
+        current step's action was applied (obs_before_step).
     env : MOfiveG_net
-        Live environment instance.  Used only to read lightweight scalar
-        attributes that are not captured in the observation array:
-          - step_counter        : current global step index
-          - last_mtd_step       : step at which the last valid MTD action fired
-          - security_penalty_cumul : running sum of per-step security penalties
+        Live environment instance. Used only to read:
+          - step_counter
+          - last_mtd_step
+          - security_penalty_cumul
 
     Returns
     -------
-    dict
-        Flat dict of float scalars keyed by "feat_*" prefix.  Every key is
-        always present; missing values are filled with 0.0 so the dict can be
-        directly merged into a CSV log row without conditional logic.
-
-    Feature groups
-    ──────────────
-    VIM resource load   : remaining CPU / RAM on core (VIM 0) and edge (VIM 1)
-    Security pressure   : per-threat-type max/mean CVSS avg score across active
-                          resources; instantaneous and cumulative security penalty
-    Network pressure    : mean / max network penalty across active resources
-    Resource overhead   : mean MTD-induced resource overhead across active resources
-    MTD budget          : minimum and mean remaining migration / reinstantiation
-                          budget across active resources
-    Temporal pressure   : steps elapsed since the last MTD action fired;
-                          total connected UEs (proxy for traffic load)
+    dict of float scalars keyed by "feat_*" prefix.
     """
     nb_res = int(obs_array[_SL_NB_RES][0])
-    active = slice(0, max(nb_res, 1))   # guard against nb_res == 0
+    active = slice(0, max(nb_res, 1))
 
-    # ── VIM resource load ─────────────────────────────────────────────────────
     vim_res = obs_array[_SL_VIM_RES].reshape(_N_VIM, 3)
-    # VIM index 0 = core (VIM 1 in the network config)
-    # VIM index 1 = edge (VIM 2 in the network config)
     vim0_cpu, vim0_ram, _vim0_disk = vim_res[0]
     vim1_cpu, vim1_ram, _vim1_disk = vim_res[1]
 
-    # ── Per-resource threat scores (col 0 = avg CVSS score) ──────────────────
-    apt_avg       = obs_array[_SL_APT     ].reshape(_N_RES, 2)[active, 0]
-    dataleak_avg  = obs_array[_SL_DATALEAK].reshape(_N_RES, 2)[active, 0]
-    dos_avg       = obs_array[_SL_DOS     ].reshape(_N_RES, 2)[active, 0]
+    apt_avg      = obs_array[_SL_APT     ].reshape(_N_RES, 2)[active, 0]
+    dataleak_avg = obs_array[_SL_DATALEAK].reshape(_N_RES, 2)[active, 0]
+    dos_avg      = obs_array[_SL_DOS     ].reshape(_N_RES, 2)[active, 0]
 
-    # ── Penalty signals ───────────────────────────────────────────────────────
     net_pen = obs_array[_SL_NET_PEN][active]
     sec_pen = obs_array[_SL_SEC_PEN][active]
 
-    # ── MTD overhead and budget ───────────────────────────────────────────────
     mtd_ohd    = obs_array[_SL_MTD_OHD][active]
     mtd_con    = obs_array[_SL_MTD_CON].reshape(_N_RES, 2)[active]
-    rem_mig    = mtd_con[:, 0]   # remaining migrations per resource
-    rem_reinst = mtd_con[:, 1]   # remaining reinstantiations per resource
+    rem_mig    = mtd_con[:, 0]
+    rem_reinst = mtd_con[:, 1]
 
-    # ── UE connectivity ───────────────────────────────────────────────────────
     nb_ues = obs_array[_SL_NB_UES][active]
 
-    # ── Temporal / episodic trackers (read from env, not obs) ─────────────────
-    # last_mtd_step and security_penalty_cumul are injected into the env by
-    # the step() hook added in mo_fiveg_mdp.py; fall back to safe defaults so
-    # this function also works when called outside that context.
-    steps_since_mtd   = float(env.step_counter - getattr(env, "last_mtd_step", 0))
-    sec_pen_cumul     = float(getattr(env, "security_penalty_cumul", 0.0))
+    steps_since_mtd = float(env.step_counter - getattr(env, "last_mtd_step", 0))
+    sec_pen_cumul   = float(getattr(env, "security_penalty_cumul", 0.0))
 
     def _safe_max(arr):  return float(arr.max())  if arr.size > 0 else 0.0
     def _safe_mean(arr): return float(arr.mean()) if arr.size > 0 else 0.0
@@ -138,33 +99,26 @@ def extract_state_features(obs_array: np.ndarray, env) -> dict:
     def _safe_sum(arr):  return float(arr.sum())  if arr.size > 0 else 0.0
 
     return {
-        # VIM resource load
         "feat_vim0_cpu":               float(vim0_cpu),
         "feat_vim0_ram":               float(vim0_ram),
         "feat_vim1_cpu":               float(vim1_cpu),
         "feat_vim1_ram":               float(vim1_ram),
-        # Security pressure — threat scores
         "feat_max_apt_score":          _safe_max(apt_avg),
         "feat_mean_apt_score":         _safe_mean(apt_avg),
         "feat_max_dataleak_score":     _safe_max(dataleak_avg),
         "feat_mean_dataleak_score":    _safe_mean(dataleak_avg),
         "feat_max_dos_score":          _safe_max(dos_avg),
         "feat_mean_dos_score":         _safe_mean(dos_avg),
-        # Security pressure — penalty signals
         "feat_mean_security_penalty":  _safe_mean(sec_pen),
         "feat_max_security_penalty":   _safe_max(sec_pen),
         "feat_security_penalty_cumul": sec_pen_cumul,
-        # Network pressure
         "feat_mean_network_penalty":   _safe_mean(net_pen),
         "feat_max_network_penalty":    _safe_max(net_pen),
-        # Resource overhead from MTD operations
         "feat_mean_mtd_overhead":      _safe_mean(mtd_ohd),
-        # MTD budget remaining
         "feat_min_remaining_mig":      _safe_min(rem_mig),
         "feat_mean_remaining_mig":     _safe_mean(rem_mig),
         "feat_min_remaining_reinst":   _safe_min(rem_reinst),
         "feat_mean_remaining_reinst":  _safe_mean(rem_reinst),
-        # Temporal pressure
         "feat_steps_since_last_mtd":   steps_since_mtd,
         "feat_total_ues":              _safe_sum(nb_ues),
         "feat_nb_resources":           float(nb_res),
@@ -197,30 +151,39 @@ def _get_q_values(model, obs_np, weights_arr, algo, env=None):
     Returns
     -------
     q_values : np.ndarray
-        Shape and semantics depend on q_type (see below).
+        Shape depends on q_type.
     q_type : str
-        "MORL_vec"        (n_actions, 3)   Envelope true vector Q, or EUPG
-                                           DecomposedQNet vector Q
-        "EUPG_decomposed" (n_actions, 3)   EUPG proxy vector Q (fallback when
-                                           DecomposedQNet is unavailable)
+        "MORL_vec"        (n_actions, 3)   Envelope / EUPG DecomposedQNet
+        "EUPG_decomposed" (n_actions, 3)   EUPG proxy fallback
         "Scalar"          (n_actions,)     DQN scalar Q
-        "PPO_Q"           (n_actions,)     PPO TD-trained scalar Q
-        "A2C_Q"           (n_actions,)     A2C TD-trained scalar Q
+        "PPO_Q"           (n_actions,)     PPO TD-trained proxy Q
+        "A2C_Q"           (n_actions,)     A2C TD-trained proxy Q
     aux : dict
-        Algorithm-specific extras:
-          Envelope        : {}
-          EUPG (QNet)     : {"probs": (n_actions,)}  policy probabilities;
-                            reference_action = argmax(probs) to reflect
-                            EUPG's stochastic policy intent
-          EUPG (fallback) : {"probs": (n_actions,)}  reference_action uses
-                            argmax(probs) to avoid V(s) sign ambiguity
-          DQN             : {}
-          PPO (QNet)      : {"q_vals": ..., "logits": ...}
-                            reference_action = argmax(logits) to reflect PPO's
-                            stochastic policy intent
-          A2C (A2CQNet)   : {"q_vals": ..., "logits": ...}
-                            reference_action = argmax(logits) to reflect A2C's
-                            stochastic policy intent
+        Algorithm-specific extras.
+
+        DQN additions (NEW):
+            "all_q_values" : np.ndarray (n_actions,)
+                Full per-action scalar Q array. Used to populate
+                q_a{i}_scalar columns in the CSV log, enabling SHAP
+                on individual action Q values analogous to Envelope's
+                per-action Q table.
+
+        PPO additions (NEW):
+            "logit_probs"  : np.ndarray (n_actions,)
+                Softmax probabilities derived directly from the policy
+                network's logits (not sampled). Stored as
+                prob_action_{i} columns so SHAP can use the true policy
+                distribution as target, consistent with EUPG's
+                prob_action_{i} columns.
+            "logits"       : np.ndarray (n_actions,)
+                Raw unnormalised logits before softmax, retained for
+                reference_action selection via argmax.
+
+        A2C additions (NEW):
+            Same keys as PPO: "logit_probs" and "logits".
+            Rationale identical: expose the true stochastic policy
+            distribution rather than the proxy Q net so that SHAP
+            targets are semantically comparable across EUPG, PPO, A2C.
     """
     obs_t = torch.tensor(obs_np, dtype=torch.float32)
     if obs_t.ndim == 1:
@@ -241,19 +204,10 @@ def _get_q_values(model, obs_np, weights_arr, algo, env=None):
         )
         q_net = getattr(model, "decomposed_q_net", None)
         if q_net is not None:
-            # Per-action per-objective Q trained on EUPG's own transitions.
-            # reference_action = argmax(probs), consistent with EUPG's stochastic
-            # policy: the greedy Q target estimates a policy different from
-            # EUPG's own, so probs better reflects EUPG's actual decision
-            # criterion.
             with torch.no_grad():
-                q_vec = q_net(obs_t).squeeze(0).cpu().numpy()  # (n_actions, N_OBJ)
+                q_vec = q_net(obs_t).squeeze(0).cpu().numpy()
             return q_vec.astype(np.float32), "MORL_vec", {"probs": probs}
         else:
-            # Proxy Q: Q(s,a) = (probs[a] / mean(probs)) * V(s).
-            # V(s) has no action-dependent structure; per-component delta
-            # direction is determined by the sign of V(s) components.
-            # reference_action = argmax(probs) to avoid sign ambiguity from V(s).
             decomposed_critic = getattr(model, "decomposed_critic", None)
             with torch.no_grad():
                 v = decomposed_critic(obs_t).squeeze(0).cpu().numpy()
@@ -264,49 +218,58 @@ def _get_q_values(model, obs_np, weights_arr, algo, env=None):
     elif algo == "DQN":
         with torch.no_grad():
             q = model.policy.q_net(obs_t).cpu().numpy().squeeze()
-        return q.astype(np.float32), "Scalar", {}
+        q = q.astype(np.float32)
+        # NEW: store the full per-action Q array in aux so that
+        # _build_log_entry() can write q_a{i}_scalar columns for SHAP.
+        return q, "Scalar", {"all_q_values": q}
 
     elif algo == "A2C":
         a2c_q_net = getattr(model, "a2c_q_net", None)
-        # TD-trained Q(s,a) for all actions using A2C's own transitions.
-        # reference_action = argmax(logits), consistent with A2C's stochastic
-        # policy intent: the independently trained Q network estimates a greedy
-        # policy different from A2C's own stochastic policy, so logits better
-        # reflect A2C's actual decision criterion.  Q values are retained in
-        # aux for delta computation in the explanation.
         with torch.no_grad():
-            q_vals = a2c_q_net(obs_t).squeeze(0).cpu().numpy()   # (n_actions,)
+            q_vals = a2c_q_net(obs_t).squeeze(0).cpu().numpy()
             dist   = model.policy.get_distribution(obs_t)
             logits = dist.distribution.logits.squeeze().cpu().numpy()
+        # NEW: compute softmax probabilities from logits so they can be
+        # stored as prob_action_{i} columns, matching EUPG's format and
+        # enabling consistent SHAP analysis on the true policy distribution.
+        logit_probs = _softmax(logits)
         return q_vals.astype(np.float32), "A2C_Q", {
-            "q_vals": q_vals.astype(np.float32),
-            "logits": logits.astype(np.float32),
+            "q_vals":      q_vals.astype(np.float32),
+            "logits":      logits.astype(np.float32),
+            "logit_probs": logit_probs.astype(np.float32),  # NEW
         }
 
     else:   # PPO
         ppo_q_net = getattr(model, "ppo_q_net", None)
-        # TD-trained Q(s,a) for all actions using PPO's own transitions.
-        # reference_action = argmax(logits), consistent with PPO's stochastic
-        # policy intent: the independently trained Q network estimates a greedy
-        # policy different from PPO's own stochastic policy, so logits better
-        # reflect PPO's actual decision criterion.  Q values are retained in
-        # aux for delta computation in the explanation.
         with torch.no_grad():
-            q_vals = ppo_q_net(obs_t).squeeze(0).cpu().numpy()   # (n_actions,)
+            q_vals = ppo_q_net(obs_t).squeeze(0).cpu().numpy()
             dist   = model.policy.get_distribution(obs_t)
             logits = dist.distribution.logits.squeeze().cpu().numpy()
+        # NEW: same rationale as A2C above.
+        logit_probs = _softmax(logits)
         return q_vals.astype(np.float32), "PPO_Q", {
-            "q_vals": q_vals.astype(np.float32),
-            "logits": logits.astype(np.float32),
+            "q_vals":      q_vals.astype(np.float32),
+            "logits":      logits.astype(np.float32),
+            "logit_probs": logit_probs.astype(np.float32),  # NEW
         }
 
 
-# ── Determinism classification ────────────────────────────────────────────────
-# Deterministic at inference: mismatch implies exploration or non-convergence.
-_DETERMINISTIC_ALGOS = {"Envelope", "DQN"}
+def _softmax(x: np.ndarray) -> np.ndarray:
+    """
+    Numerically stable softmax.
 
-# Stochastic at inference: mismatch is expected during normal operation.
-_STOCHASTIC_ALGOS = {"EUPG", "PPO", "A2C"}
+    Used to convert raw policy logits to probabilities for PPO and A2C.
+    These probabilities are stored in prob_action_{i} columns so that SHAP
+    can treat them as targets, consistent with EUPG's action_probs output.
+    """
+    e = np.exp(x - x.max())
+    return e / e.sum()
+
+
+# ── Determinism classification ────────────────────────────────────────────────
+
+_DETERMINISTIC_ALGOS = {"Envelope", "DQN"}
+_STOCHASTIC_ALGOS    = {"EUPG", "PPO", "A2C"}
 
 
 # ── Action selection ──────────────────────────────────────────────────────────
@@ -315,38 +278,8 @@ def _select_actions(q_values, weights_arr, q_type, algo, env_action=None, aux=No
     """
     Determine best_action, alt_action, reference_action, and match for RDX.
 
-    best_action
-        The action the agent actually executed (env_action).  Falls back to
-        reference_action when env_action is None (pure pairwise mode).
-
-    reference_action
-        Deterministic optimum under each algorithm's criterion:
-          Envelope                  → argmax(Q_vec @ weights)
-          EUPG (DecomposedQNet)     → argmax(probs)  [stochastic policy reference;
-                                       DecomposedQNet uses a greedy TD target that
-                                       estimates a different policy than EUPG's own]
-          EUPG (fallback proxy)     → argmax(probs)  [avoids V(s) sign ambiguity]
-          DQN                       → argmax(Q_scalar)
-          PPO / A2C (with QNet)     → argmax(logits) [stochastic policy reference;
-                                       QNet uses a greedy TD target that estimates
-                                       a different policy than the stochastic one]
-
-    alt_action
-        reference_action != best_action → alt = reference_action
-            (the greedy/stochastic optimum serves as the natural contrast)
-        reference_action == best_action → alt = second-highest scalar_q
-            (agent chose the optimum; contrast against the next-best option)
-
-    match
-        bool: best_action == reference_action.
-        Envelope / DQN  : expected ~100% for a converged deterministic policy.
-        EUPG / PPO / A2C: structurally low; stochastic sampling from the policy
-                          distribution vs a deterministic reference guarantees
-                          frequent mismatches regardless of policy quality.
-
-    Returns
-    -------
-    best_action, alt_action, scalar_q, reference_action, match
+    reference_action selection logic is unchanged from the original.
+    alt_action and match logic are also unchanged.
     """
     if aux is None:
         aux = {}
@@ -354,35 +287,22 @@ def _select_actions(q_values, weights_arr, q_type, algo, env_action=None, aux=No
     if q_type in ("MORL_vec", "EUPG_decomposed"):
         scalar_q = q_values @ weights_arr
     else:
-        scalar_q = q_values   # already scalar for DQN, PPO_Q, A2C_Q
+        scalar_q = q_values
 
-    # Determine reference_action per algorithm semantics.
     if q_type in ("MORL_vec", "EUPG_decomposed") and algo == "EUPG" and "probs" in aux:
-        # Both EUPG paths use argmax(probs) as reference, reflecting EUPG's
-        # stochastic policy intent.  For the DecomposedQNet path the greedy TD
-        # target estimates a policy different from EUPG's own stochastic policy,
-        # making probs the more faithful reference criterion.
         reference_action = int(np.argmax(aux["probs"]))
     elif algo in _STOCHASTIC_ALGOS and "logits" in aux:
-        # PPO and A2C use argmax(logits) as reference, reflecting their
-        # stochastic policy intent.  The independently trained QNet estimates a
-        # greedy policy different from the stochastic policy, so logits are the
-        # more faithful reference criterion.
         reference_action = int(np.argmax(aux["logits"]))
     else:
-        # Deterministic paths (Envelope, DQN): greedy argmax on scalar_q.
         reference_action = int(np.argmax(scalar_q))
 
-    # best_action: what the agent actually executed.
     if env_action is not None:
         best_action = int(env_action)
     else:
         best_action = reference_action
 
-    # match: did the agent's executed action coincide with the reference?
     match = int(best_action == reference_action) if env_action is not None else None
 
-    # alt_action: the contrast action for the explanation.
     if reference_action != best_action:
         alt_action = reference_action
     else:
@@ -396,24 +316,7 @@ def _select_actions(q_values, weights_arr, q_type, algo, env_action=None, aux=No
 
 def _build_morl_summary(best_action, alt_action, reference_action,
                         delta, weights_arr, q_type, algo, match):
-    """
-    Build a human-readable RDX summary for MORL algorithms (Envelope / EUPG).
-
-    Parameters
-    ----------
-    delta : np.ndarray, shape (3,)
-        q_vector[best_action] - q_vector[alt_action].
-        Positive delta[i]: best_action gains on objective i.
-
-    match semantics
-    ───────────────
-    None  : no env_action; pure pairwise comparison.
-    True  : agent chose the reference action; alt is the next-best action.
-    False : agent did not choose the reference action; alt is the reference.
-            For EUPG / A2C / PPO this is structurally expected: stochastic
-            sampling frequently deviates from any deterministic reference.
-            For Envelope / DQN this implies non-convergence or exploration.
-    """
+    """Build a human-readable RDX summary for MORL algorithms."""
     improved = []
     degraded = []
     for i, name in enumerate(OBJ_NAMES):
@@ -490,18 +393,7 @@ def _build_morl_summary(best_action, alt_action, reference_action,
 
 def _build_scalar_summary(best_action, alt_action, reference_action,
                           delta, algo, q_type, match):
-    """
-    Build a human-readable RDX summary for single-objective algorithms.
-
-    Parameters
-    ----------
-    delta : float
-        scalar_q[best_action] - scalar_q[alt_action].
-        For PPO_Q / A2C_Q: delta = q_vals[best] - q_vals[alt]
-        (mean cancels out).  Positive delta: best_action scores higher on the
-        scalar metric.  Delta can be negative when match=False (agent chose a
-        lower-value action via stochastic sampling).
-    """
+    """Build a human-readable RDX summary for single-objective algorithms."""
     is_stochastic = algo in _STOCHASTIC_ALGOS
 
     if q_type == "PPO_Q":
@@ -509,10 +401,8 @@ def _build_scalar_summary(best_action, alt_action, reference_action,
         ref_label = f"highest-logit action (action {reference_action})"
         algo_note = (
             "[PPO: Q(s,a) trained via TD on PPO's own transitions. "
-            "reference_action = argmax(logits) to reflect PPO's stochastic "
-            "policy intent; PPOQNet's greedy TD target estimates a policy "
-            "different from PPO's own. Match rate is structurally low due to "
-            "stochastic policy sampling. "
+            "reference_action = argmax(logits). "
+            "prob_action_i columns contain softmax(logits) for SHAP analysis. "
             "Reward decomposition not applicable.]"
         )
     elif q_type == "A2C_Q":
@@ -520,17 +410,16 @@ def _build_scalar_summary(best_action, alt_action, reference_action,
         ref_label = f"highest-logit action (action {reference_action})"
         algo_note = (
             "[A2C: Q(s,a) trained via TD on A2C's own transitions. "
-            "reference_action = argmax(logits) to reflect A2C's stochastic "
-            "policy intent; A2CQNet's greedy TD target estimates a policy "
-            "different from A2C's own. Match rate is structurally low due to "
-            "stochastic policy sampling. "
+            "reference_action = argmax(logits). "
+            "prob_action_i columns contain softmax(logits) for SHAP analysis. "
             "Reward decomposition not applicable.]"
         )
-    else:   # Scalar (DQN)
+    else:   # Scalar DQN
         metric    = "Q-value"
         ref_label = f"highest-Q action (action {reference_action})"
         algo_note = (
             "[DQN: single-objective algorithm. "
+            "q_a{i}_scalar columns contain per-action Q values for SHAP. "
             "Reward decomposition not applicable.]"
         )
 
@@ -582,12 +471,11 @@ def reward_difference_explanation(model, obs, weights=None, env_action=None, env
     obs        : flat observation array (obs_before_step)
     weights    : objective weights; defaults to module-level rewards_coeff
     env_action : action the agent actually executed (None = pairwise mode)
-    env        : live MOfiveG_net instance; required for EUPG accrued reward
+    env        : live MOfiveG_net instance
 
     Returns
     -------
-    dict with explanation fields; structure varies by algorithm type
-    (MORL_RDX, SingleObjective_RDX, or SingleObjective_PolicyBased).
+    dict with explanation fields.
     """
     weights_arr = np.array(weights if weights is not None else rewards_coeff,
                            dtype=np.float32)
@@ -605,25 +493,15 @@ def reward_difference_explanation(model, obs, weights=None, env_action=None, env
 
     # ── MORL: Envelope / EUPG ─────────────────────────────────────────────────
     if q_type in ("MORL_vec", "EUPG_decomposed"):
-        best_q = q_values[best_action]   # np.ndarray (3,) — local only
-        alt_q  = q_values[alt_action]    # np.ndarray (3,) — local only
-        delta  = best_q - alt_q          # np.ndarray (3,) — local only
+        best_q = q_values[best_action]
+        alt_q  = q_values[alt_action]
+        delta  = best_q - alt_q
 
         summary, improved, degraded = _build_morl_summary(
             best_action, alt_action, reference_action,
             delta, weights_arr, q_type, algo, match
         )
 
-        # IMPORTANT — no numpy arrays in this dict.
-        # This dict is stored in info["explanation"] inside env.step(), which
-        # means it flows through SB3 callbacks and is reachable by torch.save()
-        # when Envelope calls agent.save().  Any numpy array here will be
-        # pickled into memory, causing MemoryError on long runs.
-        #
-        # The full per-action Q table (needed for the q_a{i}_* CSV columns) is
-        # extracted separately in env.step() via _get_all_actions_q_columns(),
-        # which is called *after* reward_difference_explanation() returns and
-        # writes directly into the log entry — it never enters info at all.
         result = {
             "type":               "MORL_RDX",
             "algo":               algo,
@@ -634,7 +512,6 @@ def reward_difference_explanation(model, obs, weights=None, env_action=None, env
             "alternative_action": int(alt_action),
             "match":              match,
             "summary":            summary,
-            # Chosen-vs-alt weighted Q differences — Python floats only.
             "best_weighted_q_resource": float(best_q[0] * weights_arr[0]),
             "best_weighted_q_network":  float(best_q[1] * weights_arr[1]),
             "best_weighted_q_security": float(best_q[2] * weights_arr[2]),
@@ -645,10 +522,9 @@ def reward_difference_explanation(model, obs, weights=None, env_action=None, env
             "weighted_delta_network":   float(delta[1]  * weights_arr[1]),
             "weighted_delta_security":  float(delta[2]  * weights_arr[2]),
             "overall_advantage":        float(np.dot(delta, weights_arr)),
-            "improved":                 improved,   # list[str] — pickle-safe
-            "degraded":                 degraded,   # list[str] — pickle-safe
+            "improved":                 improved,
+            "degraded":                 degraded,
         }
-        # EUPG policy distribution: convert numpy array → list[float].
         if "probs" in aux:
             result["action_probs"] = [float(p) for p in aux["probs"]]
         return result
@@ -660,7 +536,7 @@ def reward_difference_explanation(model, obs, weights=None, env_action=None, env
             best_action, alt_action, reference_action,
             delta, algo, q_type, match
         )
-        return {
+        result = {
             "type":               "SingleObjective_RDX",
             "algo":               "DQN",
             "q_type":             q_type,
@@ -673,6 +549,11 @@ def reward_difference_explanation(model, obs, weights=None, env_action=None, env
             "alt_q":              float(scalar_q[alt_action]),
             "delta":              delta,
         }
+        # NEW: store the full per-action Q array so _build_log_entry() can
+        # write q_a{i}_scalar columns for SHAP, mirroring Envelope's table.
+        if "all_q_values" in aux:
+            result["all_q_values"] = [float(v) for v in aux["all_q_values"]]
+        return result
 
     # ── PPO / A2C ─────────────────────────────────────────────────────────────
     else:
@@ -681,7 +562,7 @@ def reward_difference_explanation(model, obs, weights=None, env_action=None, env
             best_action, alt_action, reference_action,
             delta, algo, q_type, match
         )
-        return {
+        result = {
             "type":               "SingleObjective_PolicyBased",
             "algo":               algo,
             "q_type":             q_type,
@@ -694,6 +575,12 @@ def reward_difference_explanation(model, obs, weights=None, env_action=None, env
             "alt_q":              float(scalar_q[alt_action]),
             "delta":              delta,
         }
+        # NEW: store softmax(logits) as action_probs so _build_log_entry()
+        # writes prob_action_{i} columns, consistent with EUPG's output and
+        # enabling SHAP on the true policy distribution for PPO and A2C.
+        if "logit_probs" in aux:
+            result["action_probs"] = [float(p) for p in aux["logit_probs"]]
+        return result
 
 
 # ── Log entry builder ─────────────────────────────────────────────────────────
@@ -703,50 +590,26 @@ def _build_log_entry(step_counter, action, explanation,
     """
     Build a flat dict suitable for CSV export via pd.DataFrame.
 
-    Parameters
-    ----------
-    step_counter : int
-        Current global step index from the environment.
-    action : int
-        Action the agent executed this step (env_action).
-    explanation : dict
-        Output of reward_difference_explanation().
-    obs_array : np.ndarray or None
-        Flat observation array captured *before* the action was applied
-        (obs_before_step).  When provided together with env, state features
-        are extracted via extract_state_features() and appended as "feat_*"
-        columns.  Pass None to omit state features (e.g. for scalar algorithms
-        or when replaying old logs without retraining).
-    env : MOfiveG_net or None
-        Live environment instance needed by extract_state_features() to read
-        temporal trackers (last_mtd_step, security_penalty_cumul).
-        Must be provided together with obs_array; ignored if obs_array is None.
-    reward_noScalar : list[float] or None
-        Three-element per-objective reward received at this step, in the order
-        [resource, network, security].  Each component equals the corresponding
-        objective reward plus final_reward (which encodes action validity:
-        0 for a valid MTD action, -10 for the null action, -20 for an invalid
-        action).  Written as "reward_resource", "reward_network",
-        "reward_security" columns so every algorithm row carries the same
-        ground-truth reward signal regardless of whether it is MORL or scalar.
-        Pass None to omit these columns (backward-compatible with old logs).
+    New columns added by this revision
+    ────────────────────────────────────
+    DQN:
+        q_a{i}_scalar   Per-action scalar Q value for action i.
+                        Enables SHAP on individual action Q values,
+                        mirroring Envelope's q_a{i}_resource/network/security
+                        columns and providing a consistent per-action table
+                        across all algorithms.
 
-    Column groups in the returned dict
-    ───────────────────────────────────
-    Metadata         : step, algo, q_type, exp_type
-    Actions          : env_action, reference_action, alt_action, match
-    Summary          : summary (human-readable text)
-    Per-obj rewards  : reward_resource, reward_network, reward_security
-                       (all algorithms; present when reward_noScalar is given)
-    MORL Q-diffs     : weighted_{resource,network,security}_diff,
-                       best_weighted_q_{resource,network,security},
-                       alt_weighted_q_{resource,network,security}
-    MORL full table  : q_a{i}_resource, q_a{i}_network, q_a{i}_security,
-                       scalar_q_a{i}  for i in 0..n_actions-1
-                       (11×3 raw Q columns + 11 scalarised Q columns = 44 cols)
-    EUPG policy      : prob_action_<i>, max_prob, max_prob_action, policy_entropy
-    Scalar Q         : best_q, alt_q, delta          (DQN / PPO / A2C)
-    State features   : feat_*  (all algorithms; present when obs_array+env given)
+    PPO / A2C:
+        prob_action_{i} Softmax probability of action i derived from the
+                        policy network's logits. Semantically equivalent to
+                        EUPG's prob_action_{i} (which comes from
+                        get_action_probabilities). Enables SHAP on the true
+                        policy distribution, which is the natural target for
+                        "explain why action i was preferred" in stochastic
+                        policies.
+        max_prob        Maximum probability across all actions.
+        max_prob_action Index of the most probable action.
+        policy_entropy  Entropy of the policy distribution H = -sum p log p.
     """
     entry = {
         "step":             step_counter,
@@ -760,14 +623,6 @@ def _build_log_entry(step_counter, action, explanation,
         "summary":          explanation["summary"],
     }
 
-    # ── Per-objective step reward (all algorithms) ────────────────────────────
-    # Placed immediately after the action columns so that reward_resource /
-    # reward_network / reward_security appear before the algorithm-specific
-    # Q-value columns in every CSV, making cross-algorithm comparison easier.
-    # Each value = objective_reward + final_reward, where final_reward is:
-    #   0   valid MTD action executed
-    #  -10  null action (action == 0)
-    #  -20  invalid action rejected by is_action_possible()
     if reward_noScalar is not None:
         entry["reward_resource"] = float(reward_noScalar[0])
         entry["reward_network"]  = float(reward_noScalar[1])
@@ -777,7 +632,6 @@ def _build_log_entry(step_counter, action, explanation,
 
     if exp_type == "MORL_RDX":
         entry.update({
-            # Chosen-vs-alt weighted Q differences — already plain floats.
             "weighted_resource_diff":   explanation["weighted_delta_resource"],
             "weighted_network_diff":    explanation["weighted_delta_network"],
             "weighted_security_diff":   explanation["weighted_delta_security"],
@@ -788,42 +642,36 @@ def _build_log_entry(step_counter, action, explanation,
             "alt_weighted_q_network":   explanation["alt_weighted_q_network"],
             "alt_weighted_q_security":  explanation["alt_weighted_q_security"],
         })
-
-        # Full per-action Q table columns are injected directly by
-        # _get_all_actions_q_columns() inside env.step() after this function
-        # returns, so they never pass through info["explanation"] and are never
-        # touched by torch.save().  Nothing to do here for those columns.
-
-        # EUPG-specific policy distribution (action_probs is list[float]).
+        # EUPG policy distribution (present for EUPG, absent for Envelope).
         if "action_probs" in explanation:
-            probs = explanation["action_probs"]   # list[float]
-            for i, p in enumerate(probs):
-                entry[f"prob_action_{i}"] = round(p, 6)
-            max_p = max(probs)
-            entry["max_prob"]        = round(max_p, 6)
-            entry["max_prob_action"] = int(probs.index(max_p))
-            entry["policy_entropy"]  = round(
-                -sum(p * np.log(p + 1e-8) for p in probs), 6
-            )
+            _write_prob_columns(entry, explanation["action_probs"])
 
     elif exp_type == "SingleObjective_RDX":
+        # DQN
         entry.update({
             "best_q": explanation["best_q"],
             "alt_q":  explanation["alt_q"],
             "delta":  explanation["delta"],
         })
+        # NEW: per-action scalar Q columns for SHAP.
+        if "all_q_values" in explanation:
+            for i, q_val in enumerate(explanation["all_q_values"]):
+                entry[f"q_a{i}_scalar"] = q_val
 
     elif exp_type == "SingleObjective_PolicyBased":
+        # PPO / A2C
         entry.update({
             "best_q": explanation["best_q"],
             "alt_q":  explanation["alt_q"],
             "delta":  explanation["delta"],
         })
+        # NEW: per-action softmax probability columns for SHAP.
+        # Written using the same helper as EUPG so column names are identical
+        # (prob_action_{i}, max_prob, max_prob_action, policy_entropy),
+        # enabling cross-algorithm SHAP comparison on the policy distribution.
+        if "action_probs" in explanation:
+            _write_prob_columns(entry, explanation["action_probs"])
 
-    # ── State features (all algorithms) ──────────────────────────────────────
-    # Appended as "feat_*" columns for every algorithm, not just MORL.
-    # Rows produced without obs_array / env simply lack these columns, which
-    # pandas handles gracefully as NaN when DataFrames are concatenated.
     if obs_array is not None and env is not None:
         state_feats = extract_state_features(obs_array, env)
         entry.update(state_feats)
@@ -831,7 +679,34 @@ def _build_log_entry(step_counter, action, explanation,
     return entry
 
 
-# ── Full per-action Q table extractor (MORL only) ─────────────────────────────
+def _write_prob_columns(entry: dict, probs: list) -> None:
+    """
+    Write prob_action_{i}, max_prob, max_prob_action, and policy_entropy
+    into entry in-place.
+
+    Shared by EUPG, PPO, and A2C so that all three produce identical column
+    names. For EUPG probs come from get_action_probabilities(); for PPO/A2C
+    they come from softmax(logits). The column semantics are the same: the
+    probability the policy assigns to each action at this state.
+
+    Parameters
+    ----------
+    entry : dict
+        Log entry dict being built by _build_log_entry(). Modified in-place.
+    probs : list[float]
+        Per-action probabilities, length == n_actions.
+    """
+    for i, p in enumerate(probs):
+        entry[f"prob_action_{i}"] = round(p, 6)
+    max_p = max(probs)
+    entry["max_prob"]        = round(max_p, 6)
+    entry["max_prob_action"] = int(probs.index(max_p))
+    entry["policy_entropy"]  = round(
+        -sum(p * np.log(p + 1e-8) for p in probs), 6
+    )
+
+
+# ── Full per-action Q table extractor (MORL only) ────────────────────────────
 
 def _get_all_actions_q_columns(model, obs_np: np.ndarray,
                                 weights: list) -> dict:
@@ -839,33 +714,24 @@ def _get_all_actions_q_columns(model, obs_np: np.ndarray,
     Run the MORL Q-network on obs_np and return one CSV column per action per
     objective, plus one scalarised column per action.
 
-    This function exists solely to keep large numpy arrays OUT of
-    info["explanation"].  It must be called inside env.step() AFTER
-    reward_difference_explanation() returns, and its output is merged directly
-    into the log entry dict — it never enters info at all, and is therefore
-    never reachable by torch.save() / Envelope agent.save().
+    Called inside env.step() AFTER reward_difference_explanation() returns.
+    Output is merged directly into the log entry dict and never enters
+    info["explanation"], so torch.save() never sees these arrays.
+
+    Returns an empty dict for non-MORL algorithms (DQN, PPO, A2C); their
+    per-action columns are written directly by _build_log_entry() from data
+    already stored in the explanation dict.
 
     Parameters
     ----------
-    model    : MORL model (Envelope or EUPG with decomposed_q_net)
-    obs_np   : np.ndarray — flat obs_before_step, same array fed to RDX
-    weights  : list[float] — objective weights, e.g. [0.4, 0.3, 0.3]
+    model   : MORL model (Envelope or EUPG with decomposed_q_net)
+    obs_np  : np.ndarray — flat obs_before_step
+    weights : list[float] — objective weights
 
     Returns
     -------
-    dict with keys:
-        q_a{i}_resource, q_a{i}_network, q_a{i}_security  — raw Q per action
-        scalar_q_a{i}                                      — dot(Q_i, weights)
-    for i in 0 .. n_actions-1.
-
-    Returns an empty dict if the model is not recognised as a supported MORL
-    type (safe to call for all algorithms).
-
-    Column count: n_actions * 4  (e.g. 12 actions → 48 columns)
-
-    Example column names for 12 actions:
-        q_a0_resource, q_a0_network, q_a0_security, scalar_q_a0,
-        q_a1_resource, ..., scalar_q_a11
+    dict with keys q_a{i}_resource, q_a{i}_network, q_a{i}_security,
+    scalar_q_a{i} for i in 0..n_actions-1. Empty dict for scalar algos.
     """
     algo = _detect_algo(model)
     if algo not in ("Envelope", "EUPG"):
@@ -880,21 +746,17 @@ def _get_all_actions_q_columns(model, obs_np: np.ndarray,
             with torch.no_grad():
                 q = model.q_net(obs_t, w_t).cpu().numpy()
             if q.ndim == 3:
-                q = q.squeeze(0)          # (n_actions, 3)
-
-        else:   # EUPG — prefer the decomposed Q-net; skip if unavailable
+                q = q.squeeze(0)
+        else:
             q_net = getattr(model, "decomposed_q_net", None)
             if q_net is None:
                 return {}
             with torch.no_grad():
-                q = q_net(obs_t).squeeze(0).cpu().numpy()  # (n_actions, 3)
-
+                q = q_net(obs_t).squeeze(0).cpu().numpy()
     except Exception:
         return {}
 
-    # q has shape (n_actions, 3); compute scalarised Q once.
-    scalar_q = q @ weights_arr   # (n_actions,)
-
+    scalar_q = q @ weights_arr
     cols = {}
     for a_idx, (q_vec, sq) in enumerate(zip(q, scalar_q)):
         cols[f"q_a{a_idx}_resource"] = float(q_vec[0])
