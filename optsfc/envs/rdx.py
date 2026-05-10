@@ -275,12 +275,6 @@ _STOCHASTIC_ALGOS    = {"EUPG", "PPO", "A2C"}
 # ── Action selection ──────────────────────────────────────────────────────────
 
 def _select_actions(q_values, weights_arr, q_type, algo, env_action=None, aux=None):
-    """
-    Determine best_action, alt_action, reference_action, and match for RDX.
-
-    reference_action selection logic is unchanged from the original.
-    alt_action and match logic are also unchanged.
-    """
     if aux is None:
         aux = {}
 
@@ -306,7 +300,9 @@ def _select_actions(q_values, weights_arr, q_type, algo, env_action=None, aux=No
     if reference_action != best_action:
         alt_action = reference_action
     else:
-        if algo in _STOCHASTIC_ALGOS and "logits" in aux:        
+        if q_type in ("MORL_vec", "EUPG_decomposed") and algo == "EUPG" and "probs" in aux:
+            sorted_idx = np.argsort(aux["probs"])[::-1]
+        elif algo in _STOCHASTIC_ALGOS and "logits" in aux:        
             sorted_idx = np.argsort(aux["logits"])[::-1]
         else:
             sorted_idx = np.argsort(scalar_q)[::-1]
