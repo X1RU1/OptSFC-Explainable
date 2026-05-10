@@ -1,4 +1,4 @@
-Algorithm,Regime,N_steps,Match_rate_%,Mean_Δ_Resource,Mean_Δ_Resource_std,Mean_Δ_Resource_median,Mean_Δ_Network,Mean_Δ_Network_std,Mean_Δ_Network_median,Mean_Δ_Security,Mean_Δ_Security_std,Mean_Δ_Security_median
+Algorithm,Regime,N_steps,Match_rate_%,Mean_Delta_Resource,Mean_Delta_Resource_std,Mean_Delta_Resource_median,Mean_Delta_Network,Mean_Delta_Network_std,Mean_Delta_Network_median,Mean_Delta_Security,Mean_Delta_Security_std,Mean_Delta_Security_median
 Envelope,Advantage (match=1),3653,73.1,0.5750,1.3667,0.4678,0.2218,1.3830,0.1826,0.5943,0.9665,0.4706
 Envelope,Regret    (match=0),1347,73.1,-2.1445,8.7979,-0.5144,-1.8997,5.7966,-0.6018,-0.8739,7.0579,0.4483
 EUPG,Advantage (match=1),638,12.8,-6.6829,3.8348,-6.9971,-4.3004,4.5781,-5.3913,-5.3336,5.0946,-4.6279

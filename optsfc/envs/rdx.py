@@ -306,7 +306,10 @@ def _select_actions(q_values, weights_arr, q_type, algo, env_action=None, aux=No
     if reference_action != best_action:
         alt_action = reference_action
     else:
-        sorted_idx = np.argsort(scalar_q)[::-1]
+        if algo in _STOCHASTIC_ALGOS and "logits" in aux:        
+            sorted_idx = np.argsort(aux["logits"])[::-1]
+        else:
+            sorted_idx = np.argsort(scalar_q)[::-1]
         alt_action = int(next(idx for idx in sorted_idx if idx != best_action))
 
     return best_action, alt_action, scalar_q, reference_action, match
