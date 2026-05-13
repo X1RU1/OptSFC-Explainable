@@ -1,2 +1,6 @@
-Algorithm,Total Steps,Match Rate (%),Adv Steps,Regret Steps,Highlight Step,Adv Mean W-ResourceΔ,Regret Mean W-ResourceΔ,Highlight W-ResourceΔ,Adv Mean W-NetworkΔ,Regret Mean W-NetworkΔ,Highlight W-NetworkΔ,Adv Mean W-SecurityΔ,Regret Mean W-SecurityΔ,Highlight W-SecurityΔ
-EUPG,5000,11.5,575,4425,48,-4.2348,1.4605,-46.0861,0.0681,-0.7456,3.4742,-1.6604,0.4119,-33.1029
+Algorithm,Total Steps,Match Rate (%),Adv Steps,Regret Steps,Highlight Step,Adv Mean Δ,Adv Std Δ,Adv Median Δ,Regret Mean Δ,Regret Std Δ,Regret Median Δ,Adv Mean W-ResourceΔ,Regret Mean W-ResourceΔ,Highlight W-ResourceΔ,Adv Mean W-NetworkΔ,Regret Mean W-NetworkΔ,Highlight W-NetworkΔ,Adv Mean W-SecurityΔ,Regret Mean W-SecurityΔ,Highlight W-SecurityΔ
+A2C,5000,25.3,1267,3733,—,-3.5605,20.0635,-0.9140,1.0454,18.6247,-0.1047,N/A,N/A,N/A,N/A,N/A,N/A,N/A,N/A,N/A
+DQN,5000,91.3,4563,437,—,0.9052,0.8047,0.6853,-19.0886,23.5185,-7.3787,N/A,N/A,N/A,N/A,N/A,N/A,N/A,N/A,N/A
+Envelope,5000,77.4,3870,1130,103,N/A,N/A,N/A,N/A,N/A,N/A,0.5308,-5.3978,2.9565,0.3443,-3.6717,-18.1019,0.6319,1.3971,17.9586
+EUPG,5000,11.5,575,4425,48,N/A,N/A,N/A,N/A,N/A,N/A,-4.2348,1.4605,-46.0861,0.0681,-0.7456,3.4742,-1.6604,0.4119,-33.1029
+PPO,6144,10.1,619,5525,—,-1.3967,27.6703,-1.8799,0.2115,21.1215,1.2397,N/A,N/A,N/A,N/A,N/A,N/A,N/A,N/A,N/A

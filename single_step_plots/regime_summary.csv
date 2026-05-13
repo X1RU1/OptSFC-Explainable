@@ -1,3 +1,5 @@
-Algorithm,Regime,N_steps,Match_rate_%
-A2C,Advantage (match=1),1267,25.3
-A2C,Regret    (match=0),3733,25.3
+Algorithm,Regime,N_steps,Match_rate_%,Mean_Delta_Resource,Mean_Delta_Resource_std,Mean_Delta_Resource_median,Mean_Delta_Network,Mean_Delta_Network_std,Mean_Delta_Network_median,Mean_Delta_Security,Mean_Delta_Security_std,Mean_Delta_Security_median
+Envelope,Advantage (match=1),3870,77.4,0.5308,1.1906,0.4339,0.3443,1.3883,0.3187,0.6319,1.0515,0.4830
+Envelope,Regret    (match=0),1130,77.4,-5.3978,18.1048,-0.5866,-3.6717,9.5721,-0.6711,1.3971,5.2890,0.6150
+EUPG,Advantage (match=1),575,11.5,-4.2348,13.1486,-0.9051,0.0681,3.3170,0.1712,-1.6604,6.8021,-0.3732
+EUPG,Regret    (match=0),4425,11.5,1.4605,12.3994,-0.5603,-0.7456,4.8878,-0.4584,0.4119,6.0872,-0.1357
