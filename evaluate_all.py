@@ -51,15 +51,16 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
+from matplotlib.lines import Line2D
 
 # ── 0. CONFIGURATION ──────────────────────────────────────────────────────────
 
 CSV_FILES = {
-    "A2C":      "a2c_explain.csv",
-    "DQN":      "dqn_explain.csv",
+    # "A2C":      "a2c_explain.csv",
+    # "DQN":      "dqn_explain.csv",
     "Envelope": "envelope_explain.csv",
     "EUPG":     "eupg_explain.csv",
-    "PPO":      "ppo_explain.csv",
+    # "PPO":      "ppo_explain.csv",
 }
 
 # ── Single-Step RDX override (MORL algorithms only) ──────────────────────────
@@ -346,106 +347,255 @@ def plot_morl_delta_split(algo: str, df: pd.DataFrame):
 
 # ── 3d. MORL pairwise scatter — split + highlight point (§6) ─────────────────
 
-def plot_morl_pairwise_split(algo: str, df: pd.DataFrame,
-                              highlight: pd.Series | None = None):
+def plot_morl_pairwise_split(
+    algo: str,
+    df: pd.DataFrame,
+    highlight: pd.Series | None = None
+):
     """
     Pairwise scatter for MORL objectives.
+
     Left column  = Advantage (match=True)
     Right column = Regret    (match=False)
 
-    §6 – If `highlight` (a single-row Series) is provided, its position is
-    overlaid on every scatter panel as a gold star with a labelled annotation.
-    This visually connects the Single-Step RDX bar chart to the overall
-    pairwise distribution.
+    Each point represents the executed action (env_action).
+    Colors correspond to executed action IDs.
     """
+
     pairs = [
-        ("weighted_resource_diff", "weighted_network_diff",  "W-Resource", "W-Network"),
-        ("weighted_resource_diff", "weighted_security_diff", "W-Resource", "W-Security"),
-        ("weighted_network_diff",  "weighted_security_diff", "W-Network",  "W-Security"),
+        ("weighted_resource_diff", "weighted_network_diff",
+         "W-Resource", "W-Network"),
+
+        ("weighted_resource_diff", "weighted_security_diff",
+         "W-Resource", "W-Security"),
+
+        ("weighted_network_diff", "weighted_security_diff",
+         "W-Network", "W-Security"),
     ]
-    pairs = [(x, y, xl, yl) for x, y, xl, yl in pairs
-             if x in df.columns and y in df.columns]
+
+    pairs = [
+        (x, y, xl, yl)
+        for x, y, xl, yl in pairs
+        if x in df.columns and y in df.columns
+    ]
+
     if not pairs:
         return
 
-    adv, regr = split_by_match(df)
-    unique_actions = sorted(df["reference_action"].dropna().unique())
-    cmap   = plt.cm.tab20(np.linspace(0, 1, max(len(unique_actions), 1)))
-    acolor = {a: cmap[i] for i, a in enumerate(unique_actions)}
+    # ----------------------------------------------------------
+    # Split by match
+    # ----------------------------------------------------------
+    adv  = df[df["match"] == True]
+    regr = df[df["match"] == False]
 
+    # ----------------------------------------------------------
+    # Executed action colours
+    # ----------------------------------------------------------
+    unique_actions = sorted(df["env_action"].dropna().unique())
+
+    cmap = plt.cm.tab20(
+        np.linspace(0, 1, max(len(unique_actions), 1))
+    )
+
+    acolor = {
+        a: cmap[i]
+        for i, a in enumerate(unique_actions)
+    }
+
+    # ----------------------------------------------------------
+    # Figure
+    # ----------------------------------------------------------
     n_pairs = len(pairs)
-    fig, axes = plt.subplots(n_pairs, 2, figsize=(10, 4 * n_pairs))
+
+    fig, axes = plt.subplots(
+        n_pairs,
+        2,
+        figsize=(10, 4 * n_pairs)
+    )
+
     if n_pairs == 1:
         axes = axes[np.newaxis, :]
+
     fig.suptitle(
         f"{algo} – Pairwise Objective Scatter Split by Match Status\n"
-        f"○ = Single-Step RDX highlight (step {int(highlight['step']) if highlight is not None else '—'})",
-        fontsize=12, fontweight="bold"
+        f"○ = Single-Step RDX highlight "
+        f"(step {int(highlight['step']) if highlight is not None else '—'})",
+        fontsize=12,
+        fontweight="bold"
     )
 
     col_titles = [
-        "Advantage  (env == ref)",
-        "Regret     (env ≠  ref)",
+        "Advantage (match=True)",
+        "Regret (match=False)",
     ]
-    for col_idx, (subset, ct) in enumerate(zip([adv, regr], col_titles)):
+
+    # ----------------------------------------------------------
+    # Panels
+    # ----------------------------------------------------------
+    for col_idx, (subset, ct) in enumerate(
+        zip([adv, regr], col_titles)
+    ):
+
         for row_idx, (xcol, ycol, xlabel, ylabel) in enumerate(pairs):
+
             ax = axes[row_idx][col_idx]
 
-            # ── background scatter ──────────────────────────────────────────
+            # --------------------------------------------------
+            # Background scatter
+            # --------------------------------------------------
             if subset.empty:
-                ax.text(0.5, 0.5, "No data", transform=ax.transAxes,
-                        ha="center", va="center", color="gray")
-            else:
-                pcolors = [acolor.get(a, "gray") for a in subset["reference_action"]]
-                ax.scatter(subset[xcol], subset[ycol],
-                           c=pcolors, alpha=0.5, s=15, edgecolors="none")
 
-            # ── §6 highlight point (Advantage panel only) ───────────────────
-            # The highlight step is always selected from match=True rows, so
-            # drawing it in the Regret panel (col_idx==1) would be misleading.
-            if col_idx == 0 and highlight is not None \
-                    and xcol in highlight.index and ycol in highlight.index:
+                ax.text(
+                    0.5,
+                    0.5,
+                    "No data",
+                    transform=ax.transAxes,
+                    ha="center",
+                    va="center",
+                    color="gray"
+                )
+
+            else:
+
+                pcolors = [
+                    acolor.get(a, "gray")
+                    for a in subset["env_action"]
+                ]
+
+                ax.scatter(
+                    subset[xcol],
+                    subset[ycol],
+                    c=pcolors,
+                    alpha=0.5,
+                    s=15,
+                    edgecolors="none"
+                )
+
+            # --------------------------------------------------
+            # Highlight point
+            # --------------------------------------------------
+            # Highlight is only shown in Advantage panel
+            if (
+                col_idx == 0
+                and highlight is not None
+                and xcol in highlight.index
+                and ycol in highlight.index
+            ):
+
                 hx = highlight[xcol]
                 hy = highlight[ycol]
-                ax.scatter(hx, hy,
-                           marker="o", s=120, facecolors="none",
-                           edgecolors="black", linewidths=1.8,
-                           zorder=10)
+
+                ax.scatter(
+                    hx,
+                    hy,
+                    marker="o",
+                    s=120,
+                    facecolors="none",
+                    edgecolors="black",
+                    linewidths=1.8,
+                    zorder=10
+                )
+
                 ax.annotate(
                     f"  step {int(highlight['step'])}",
                     xy=(hx, hy),
-                    fontsize=7, color="black",
-                    xytext=(6, 6), textcoords="offset points",
-                    arrowprops=dict(arrowstyle="-", color="black", lw=0.6),
+                    fontsize=7,
+                    color="black",
+                    xytext=(6, 6),
+                    textcoords="offset points",
+                    arrowprops=dict(
+                        arrowstyle="-",
+                        color="black",
+                        lw=0.6
+                    ),
                     zorder=11,
                 )
 
-            ax.axhline(0, color="black", linewidth=0.6, linestyle="--")
-            ax.axvline(0, color="black", linewidth=0.6, linestyle="--")
+            # --------------------------------------------------
+            # Axis lines
+            # --------------------------------------------------
+            ax.axhline(
+                0,
+                color="black",
+                linewidth=0.6,
+                linestyle="--"
+            )
+
+            ax.axvline(
+                0,
+                color="black",
+                linewidth=0.6,
+                linestyle="--"
+            )
+
+            # --------------------------------------------------
+            # Labels
+            # --------------------------------------------------
             ax.set_xlabel(xlabel, fontsize=8)
             ax.set_ylabel(ylabel, fontsize=8)
-            ax.grid(True, alpha=0.3)
-            if row_idx == 0:
-                ax.set_title(ct, fontsize=10, fontweight="bold")
-            if highlight is not None:
-                ax.legend(fontsize=7, loc="upper right")
 
-    legend_handles = [Patch(facecolor=acolor[a], label=f"Action {a}")
-                      for a in unique_actions]
-    # Add highlight marker to legend
-    from matplotlib.lines import Line2D
+            ax.grid(True, alpha=0.3)
+
+            if row_idx == 0:
+                ax.set_title(
+                    ct,
+                    fontsize=10,
+                    fontweight="bold"
+                )
+
+    # ----------------------------------------------------------
+    # Legend
+    # ----------------------------------------------------------
+    legend_handles = [
+        Patch(
+            facecolor=acolor[a],
+            label=f"Action {a}"
+        )
+        for a in unique_actions
+    ]
+
     legend_handles.append(
-        Line2D([0], [0], marker="o", color="w", markerfacecolor="none",
-               markeredgecolor="black", markersize=8, markeredgewidth=1.8,
-               label="Single-Step RDX highlight")
+        Line2D(
+            [0],
+            [0],
+            marker="o",
+            color="w",
+            markerfacecolor="none",
+            markeredgecolor="black",
+            markersize=8,
+            markeredgewidth=1.8,
+            label="Single-Step RDX highlight"
+        )
     )
-    fig.legend(handles=legend_handles, title="Best Action ID / Highlight",
-               bbox_to_anchor=(1.01, 0.5), loc="center left",
-               fontsize=7, title_fontsize=8, framealpha=0.8)
+
+    fig.legend(
+        handles=legend_handles,
+        title="Executed Action ID / Highlight",
+        bbox_to_anchor=(1.01, 0.5),
+        loc="center left",
+        fontsize=7,
+        title_fontsize=8,
+        framealpha=0.8
+    )
+
+    # ----------------------------------------------------------
+    # Layout + save
+    # ----------------------------------------------------------
     fig.tight_layout(rect=[0, 0, 0.88, 1])
-    out = os.path.join(OUTPUT_DIR, f"{algo}_pairwise_scatter_split.pdf")
-    fig.savefig(out, dpi=150, bbox_inches="tight")
+
+    out = os.path.join(
+        OUTPUT_DIR,
+        f"{algo}_pairwise_scatter_split.pdf"
+    )
+
+    fig.savefig(
+        out,
+        dpi=150,
+        bbox_inches="tight"
+    )
+
     plt.close(fig)
+
     print(f"  → {out}")
 
 
