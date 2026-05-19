@@ -54,13 +54,13 @@ Step auto-selection (match=True rows only):
 
 Outputs (algorithm-dependent)
 ──────────────────────────────
-  {out}/{algo}_step{N}_q_landscape.pdf     <- Envelope, EUPG only
-  {out}/{algo}_step{N}_q_diff.pdf          <- Envelope, EUPG only
-  {out}/{algo}_step{N}_pairwise_rdx.pdf    <- Envelope, EUPG only
-  {out}/{algo}_step{N}_state_context.pdf   <- all algorithms
-  {out}/{algo}_step{N}_feat_action_corr.pdf<- all algorithms
-  {out}/{algo}_step{N}_feat_q_corr.pdf     <- value-based only (DQN, Envelope)
-  {out}/{algo}_step{N}_feat_prob_corr.pdf  <- policy-based only (PPO, A2C, EUPG)
+  {out}/{algo}_step{N}_q_landscape.png     <- Envelope, EUPG only
+  {out}/{algo}_step{N}_q_diff.png          <- Envelope, EUPG only
+  {out}/{algo}_step{N}_pairwise_rdx.png    <- Envelope, EUPG only
+  {out}/{algo}_step{N}_state_context.png   <- all algorithms
+  {out}/{algo}_step{N}_feat_action_corr.png<- all algorithms
+  {out}/{algo}_step{N}_feat_q_corr.png     <- value-based only (DQN, Envelope)
+  {out}/{algo}_step{N}_feat_prob_corr.png  <- policy-based only (PPO, A2C, EUPG)
   {out}/regime_summary.csv
 """
 
@@ -101,7 +101,7 @@ POLICY_BASED_ALGOS = {"PPO", "A2C", "EUPG"}
 # so those heavy plots are skipped for them.
 MORL_ALGOS = {"Envelope", "EUPG"}
 
-# 23 state features grouped by semantic category
+# 22 state features grouped by semantic category
 FEAT_META = [
     # (column_name, display_label, category)
     ("feat_vim0_cpu",               "VIM0 CPU",                "Resource Load"),
@@ -124,7 +124,7 @@ FEAT_META = [
     ("feat_mean_remaining_mig",     "Mean Remaining Mig.",     "MTD Budget"),
     ("feat_min_remaining_reinst",   "Min Remaining Reinst.",   "MTD Budget"),
     ("feat_mean_remaining_reinst",  "Mean Remaining Reinst.",  "MTD Budget"),
-    ("feat_steps_since_last_mtd",   "Steps Since Last MTD",    "Temporal"),
+    # ("feat_steps_since_last_mtd",   "Steps Since Last MTD",    "Temporal"),
     ("feat_total_ues",              "Total UEs",               "Temporal"),
     ("feat_nb_resources",           "Nb. Resources",           "Temporal"),
 ]
@@ -331,7 +331,7 @@ def plot_q_landscape(row: pd.Series, n_act: int, algo: str,
         fontsize=10, fontweight="bold",
     )
     fig.tight_layout()
-    out = os.path.join(out_dir, f"{algo}_step{step_id}_q_landscape.pdf")
+    out = os.path.join(out_dir, f"{algo}_step{step_id}_q_landscape.png")
     fig.savefig(out, bbox_inches="tight")
     plt.close(fig)
     print(f"    -> {out}")
@@ -383,19 +383,14 @@ def plot_q_diff(row: pd.Series, n_act: int, algo: str,
         f"Executed: a{env_action}  vs  Reference: a{ref_action}  [{regime}]",
         fontsize=10, fontweight="bold",
     )
-    legend_handles = [
-        Patch(facecolor="#4CAF50", label="Gain (executed > reference)"),
-        Patch(facecolor="#F44336", label="Loss (executed < reference)"),
-    ]
-    ax.legend(handles=legend_handles, fontsize=8, loc="upper right")
     fig.tight_layout()
-    out = os.path.join(out_dir, f"{algo}_step{step_id}_q_diff.pdf")
+    out = os.path.join(out_dir, f"{algo}_step{step_id}_q_diff.png")
     fig.savefig(out, bbox_inches="tight")
     plt.close(fig)
     print(f"    -> {out}")
 
 
-# ── Plot 3: State context (23 feat_* features) ────────────────────────────────
+# ── Plot 3: State context (22 feat_* features) ────────────────────────────────
 # Used by: ALL algorithms
 
 def plot_state_context(row: pd.Series, algo: str,
@@ -447,7 +442,7 @@ def plot_state_context(row: pd.Series, algo: str,
         fontsize=10, fontweight="bold",
     )
     fig.tight_layout()
-    out = os.path.join(out_dir, f"{algo}_step{step_id}_state_context.pdf")
+    out = os.path.join(out_dir, f"{algo}_step{step_id}_state_context.png")
     fig.savefig(out, bbox_inches="tight")
     plt.close(fig)
     print(f"    -> {out}")
@@ -544,7 +539,7 @@ def plot_pairwise_rdx(row: pd.Series, n_act: int, algo: str,
                   fontsize=9, fontweight="bold")
 
     fig.tight_layout()
-    out = os.path.join(out_dir, f"{algo}_step{step_id}_pairwise_rdx.pdf")
+    out = os.path.join(out_dir, f"{algo}_step{step_id}_pairwise_rdx.png")
     fig.savefig(out, bbox_inches="tight")
     plt.close(fig)
     print(f"    -> {out}")
@@ -565,7 +560,7 @@ def plot_feat_action_corr(df: pd.DataFrame, n_act: int, algo: str,
     each binary indicator, answering: "which state features predict whether
     action i tends to be chosen?"
 
-    Rows = feat_* features (up to 23)
+    Rows = feat_* features (up to 22)
     Cols = a0, a1, ..., a{n_act-1}  (binary selection indicators)
 
     Only columns with non-zero variance are included.
@@ -614,7 +609,7 @@ def plot_feat_action_corr(df: pd.DataFrame, n_act: int, algo: str,
     )
 
     fig.tight_layout()
-    out = os.path.join(out_dir, f"{algo}_step{step_id}_feat_action_corr.pdf")
+    out = os.path.join(out_dir, f"{algo}_step{step_id}_feat_action_corr.png")
     fig.savefig(out, bbox_inches="tight")
     plt.close(fig)
     print(f"    -> {out}")
@@ -632,7 +627,7 @@ def plot_feat_q_corr(df: pd.DataFrame, n_act: int, algo: str,
       - q_a{i}_resource / _network / _security  ->  Envelope (MORL)
       - q_a{i}_scalar                           ->  DQN (single-objective)
 
-    Rows = feat_* features (up to 23)
+    Rows = feat_* features (up to 22)
     Cols = Q columns for all logged actions.
 
     This reveals which state features are most strongly associated with high
@@ -691,7 +686,7 @@ def plot_feat_q_corr(df: pd.DataFrame, n_act: int, algo: str,
         fontsize=9, fontweight="bold",
     )
     fig.tight_layout()
-    out = os.path.join(out_dir, f"{algo}_step{step_id}_feat_q_corr.pdf")
+    out = os.path.join(out_dir, f"{algo}_step{step_id}_feat_q_corr.png")
     fig.savefig(out, bbox_inches="tight")
     plt.close(fig)
     print(f"    -> {out}")
@@ -706,7 +701,7 @@ def plot_feat_prob_corr(df: pd.DataFrame, n_act: int, algo: str,
     POLICY-BASED algorithms that output an explicit action-probability
     distribution (PPO, A2C, EUPG).
 
-    Rows = feat_* features (up to 23)
+    Rows = feat_* features (up to 22)
     Cols = prob_action_0, ..., prob_action_{n_act-1}
 
     This reveals which state features drive the actor's output probabilities,
@@ -758,7 +753,7 @@ def plot_feat_prob_corr(df: pd.DataFrame, n_act: int, algo: str,
     )
 
     fig.tight_layout()
-    out = os.path.join(out_dir, f"{algo}_step{step_id}_feat_prob_corr.pdf")
+    out = os.path.join(out_dir, f"{algo}_step{step_id}_feat_prob_corr.png")
     fig.savefig(out, bbox_inches="tight")
     plt.close(fig)
     print(f"    -> {out}")
@@ -969,7 +964,7 @@ def main():
     parser.add_argument("--step-a2c",      type=int, default=None,
                         help="Step override for A2C only.")
     parser.add_argument("--out",           default="./single_step_plots",
-                        help="Output directory for PDF plots")
+                        help="Output directory for png plots")
     parser.add_argument("--top-k",         type=int, default=10,
                         help="Top-k pairs to print in pairwise ranking (MORL only)")
     args = parser.parse_args()
@@ -1015,7 +1010,7 @@ def main():
         # Text analysis (adapts output to available columns)
         print_step_analysis(row, n_act, algo)
 
-        # ── PDF plots (routing by algorithm) ──────────────────────────────
+        # ── png plots (routing by algorithm) ──────────────────────────────
         print(f"\n  Generating plots -> {args.out}/")
 
         # State context -- ALL algorithms

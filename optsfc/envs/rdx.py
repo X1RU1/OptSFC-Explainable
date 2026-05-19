@@ -90,7 +90,7 @@ def extract_state_features(obs_array: np.ndarray, env) -> dict:
 
     nb_ues = obs_array[_SL_NB_UES][active]
 
-    steps_since_mtd = float(env.step_counter - getattr(env, "last_mtd_step", 0))
+    # steps_since_mtd = float(env.step_counter - getattr(env, "last_mtd_step", 0)) # be placed manually
     sec_pen_cumul   = float(getattr(env, "security_penalty_cumul", 0.0))
 
     def _safe_max(arr):  return float(arr.max())  if arr.size > 0 else 0.0
@@ -119,7 +119,7 @@ def extract_state_features(obs_array: np.ndarray, env) -> dict:
         "feat_mean_remaining_mig":     _safe_mean(rem_mig),
         "feat_min_remaining_reinst":   _safe_min(rem_reinst),
         "feat_mean_remaining_reinst":  _safe_mean(rem_reinst),
-        "feat_steps_since_last_mtd":   steps_since_mtd,
+        # "feat_steps_since_last_mtd":   steps_since_mtd,
         "feat_total_ues":              _safe_sum(nb_ues),
         "feat_nb_resources":           float(nb_res),
     }
