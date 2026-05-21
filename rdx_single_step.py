@@ -11,30 +11,11 @@ multi-objective RL (MORL) algorithms, including:
 
 Plot routing per algorithm
 ──────────────────────────
-  Envelope / EUPG  →  q_landscape, q_diff, state_context, pairwise_rdx,
-                       feat_action_corr
-                       + feat_q_corr    (Envelope only)
-                       + feat_prob_corr (EUPG only)
+  Envelope / EUPG  →  q_landscape, q_diff, state_context, pairwise_rdx
 
-  DQN              →  state_context, feat_action_corr, feat_q_corr
+  DQN              →  state_context
 
-  PPO / A2C        →  state_context, feat_action_corr, feat_prob_corr
-
-Correlation plot routing
-────────────────────────
-  plot_feat_action_corr : ALL algorithms
-      Feature ↔ binary indicator (env_action == i).
-      Shows which state features drive action selection regardless of
-      whether the algorithm is value-based or policy-based.
-
-  plot_feat_q_corr      : VALUE-BASED only  (DQN, Envelope)
-      Feature ↔ per-objective (or scalar) Q-value columns.
-      Only meaningful when explicit Q estimates are logged.
-
-  plot_feat_prob_corr   : POLICY-BASED only  (PPO, A2C, EUPG)
-      Feature ↔ policy action-probability columns.
-      Only meaningful when the actor outputs an explicit probability
-      distribution over actions.
+  PPO / A2C        →  state_context
 
 Usage
 ─────
@@ -58,9 +39,6 @@ Outputs (algorithm-dependent)
   {out}/{algo}_step{N}_q_diff.png          <- Envelope, EUPG only
   {out}/{algo}_step{N}_pairwise_rdx.png    <- Envelope, EUPG only
   {out}/{algo}_step{N}_state_context.png   <- all algorithms
-  {out}/{algo}_step{N}_feat_action_corr.png<- all algorithms
-  {out}/{algo}_step{N}_feat_q_corr.png     <- value-based only (DQN, Envelope)
-  {out}/{algo}_step{N}_feat_prob_corr.png  <- policy-based only (PPO, A2C, EUPG)
   {out}/regime_summary.csv
 """
 
@@ -87,12 +65,12 @@ OBJ_NAMES  = ["Resource", "Network", "Security"]
 OBJ_COLORS = {"Resource": "#2196F3", "Network": "#FF9800", "Security": "#4CAF50"}
 
 # Algorithms that maintain explicit per-action Q-value estimates.
-# Receive: state_context, feat_action_corr, feat_q_corr.
+# Receive: state_context.
 # Envelope additionally receives: q_landscape, q_diff, pairwise_rdx.
 VALUE_BASED_ALGOS = {"DQN", "Envelope"}
 
 # Algorithms that output an explicit probability distribution over actions.
-# Receive: state_context, feat_action_corr, feat_prob_corr.
+# Receive: state_context.
 # EUPG additionally receives: q_landscape, q_diff, pairwise_rdx.
 POLICY_BASED_ALGOS = {"PPO", "A2C", "EUPG"}
 
@@ -544,220 +522,6 @@ def plot_pairwise_rdx(row: pd.Series, n_act: int, algo: str,
     print(f"    -> {out}")
 
 
-# ── Correlation Plot A: Feature <-> Action Selection (ALL algorithms) ─────────
-
-def plot_feat_action_corr(df: pd.DataFrame, n_act: int, algo: str,
-                          step_id: int, out_dir: str):
-    """
-    Feature <-> Action Selection correlation heatmap.  Generated for ALL
-    algorithms (value-based and policy-based alike).
-
-    For each action i, a binary indicator column is constructed:
-        selected_i = 1 if env_action == i else 0
-
-    Pearson correlation is then computed between the feat_* state features and
-    each binary indicator, answering: "which state features predict whether
-    action i tends to be chosen?"
-
-    Rows = feat_* features (up to 22)
-    Cols = a0, a1, ..., a{n_act-1}  (binary selection indicators)
-
-    Only columns with non-zero variance are included.
-    """
-    if "env_action" not in df.columns:
-        print(f"  [skip] {algo}: no env_action column.")
-        return
-
-    feat_cols = [col for col, _, _ in FEAT_META if col in df.columns]
-    if not feat_cols:
-        print(f"  [skip] {algo}: no feature columns.")
-        return
-
-    action_mat = pd.DataFrame({
-        f"a{i}": (df["env_action"] == i).astype(int)
-        for i in range(n_act)
-    })
-
-    sub_feat   = df[feat_cols].select_dtypes(include="number")
-    sub_feat   = sub_feat.loc[:, sub_feat.std() > 0]
-    action_mat = action_mat.loc[:, action_mat.std() > 0]
-
-    if sub_feat.empty or action_mat.empty:
-        print(f"  [skip] {algo}: zero-variance columns, cannot compute correlation.")
-        return
-
-    corr = sub_feat.join(action_mat).corr().loc[sub_feat.columns, action_mat.columns]
-
-    feat_lbl_map = {col: lbl for col, lbl, _ in FEAT_META}
-    row_labels   = [feat_lbl_map.get(r, r) for r in corr.index]
-
-    fig_h = max(6, len(row_labels) * 0.35)
-    fig_w = max(8, len(corr.columns) * 0.4)
-    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
-    im = ax.imshow(corr.values, cmap="coolwarm", vmin=-1, vmax=1, aspect="auto")
-    plt.colorbar(im, ax=ax, label="Pearson correlation")
-
-    ax.set_xticks(range(len(corr.columns)))
-    ax.set_xticklabels(corr.columns, fontsize=7, rotation=45)
-    ax.set_yticks(range(len(row_labels)))
-    ax.set_yticklabels(row_labels, fontsize=7)
-    ax.set_title(
-        f"{algo}  -  Feature <-> Action Selection  (full log, {len(df):,} rows)\n"
-        "Correlation between state features and binary action-selection indicators",
-        fontsize=10, fontweight="bold",
-    )
-
-    fig.tight_layout()
-    out = os.path.join(out_dir, f"{algo}_step{step_id}_feat_action_corr.png")
-    fig.savefig(out, bbox_inches="tight")
-    plt.close(fig)
-    print(f"    -> {out}")
-
-
-# ── Correlation Plot B: Feature <-> Q-value (VALUE-BASED only: DQN, Envelope) ─
-
-def plot_feat_q_corr(df: pd.DataFrame, n_act: int, algo: str,
-                     step_id: int, out_dir: str):
-    """
-    Feature <-> Q-value correlation heatmap.  Generated only for VALUE-BASED
-    algorithms that log explicit per-action Q estimates (DQN, Envelope).
-
-    Column formats supported:
-      - q_a{i}_resource / _network / _security  ->  Envelope (MORL)
-      - q_a{i}_scalar                           ->  DQN (single-objective)
-
-    Rows = feat_* features (up to 22)
-    Cols = Q columns for all logged actions.
-
-    This reveals which state features are most strongly associated with high
-    or low Q values across the full training log, providing global context
-    for the single-step analysis.
-
-    Only columns with non-zero variance are included.
-    """
-    feat_cols = [col for col, _, _ in FEAT_META if col in df.columns]
-    q_cols    = []
-    for i in range(n_act):
-        for obj in ("resource", "network", "security", "scalar"):
-            c = f"q_a{i}_{obj}"
-            if c in df.columns:
-                q_cols.append(c)
-
-    if not feat_cols or not q_cols:
-        print(f"  [skip] {algo}: feat/q columns missing for Q-value correlation plot.")
-        return
-
-    sub_feat = df[feat_cols].copy().select_dtypes(include="number")
-    sub_feat = sub_feat.loc[:, sub_feat.std() > 0]
-    sub_q    = df[q_cols].copy().select_dtypes(include="number")
-    sub_q    = sub_q.loc[:, sub_q.std() > 0]
-
-    if sub_feat.empty or sub_q.empty:
-        print(f"  [skip] {algo}: all-zero-variance columns, cannot compute correlation.")
-        return
-
-    corr = sub_feat.join(sub_q).corr().loc[sub_feat.columns, sub_q.columns]
-
-    # Shorten Q column labels: q_a3_resource -> a3_R, q_a3_scalar -> a3_Q
-    short_cols = (corr.columns
-                  .str.replace("q_a", "a", regex=False)
-                  .str.replace("_resource", "_R", regex=False)
-                  .str.replace("_network",  "_N", regex=False)
-                  .str.replace("_security", "_S", regex=False)
-                  .str.replace("_scalar",   "_Q", regex=False)
-                  .tolist())
-    feat_lbl_map = {col: lbl for col, lbl, _ in FEAT_META}
-    short_rows   = [feat_lbl_map.get(r, r) for r in corr.index]
-
-    fig_h = max(6, len(corr.index) * 0.35)
-    fig_w = max(10, len(corr.columns) * 0.32)
-    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
-    im = ax.imshow(corr.values, cmap="coolwarm", vmin=-1, vmax=1, aspect="auto")
-    plt.colorbar(im, ax=ax, label="Pearson correlation")
-
-    ax.set_xticks(range(len(short_cols)))
-    ax.set_xticklabels(short_cols, fontsize=5.5, rotation=90)
-    ax.set_yticks(range(len(short_rows)))
-    ax.set_yticklabels(short_rows, fontsize=7)
-    ax.set_title(
-        f"{algo}  -  Feature <-> Q-value Correlation  (full log, {len(df):,} rows)\n"
-        "Correlation between state features and per-action Q-value estimates",
-        fontsize=9, fontweight="bold",
-    )
-    fig.tight_layout()
-    out = os.path.join(out_dir, f"{algo}_step{step_id}_feat_q_corr.png")
-    fig.savefig(out, bbox_inches="tight")
-    plt.close(fig)
-    print(f"    -> {out}")
-
-
-# ── Correlation Plot C: Feature <-> Policy Probability (POLICY-BASED only) ────
-
-def plot_feat_prob_corr(df: pd.DataFrame, n_act: int, algo: str,
-                        step_id: int, out_dir: str):
-    """
-    Feature <-> Policy Probability correlation heatmap.  Generated only for
-    POLICY-BASED algorithms that output an explicit action-probability
-    distribution (PPO, A2C, EUPG).
-
-    Rows = feat_* features (up to 22)
-    Cols = prob_action_0, ..., prob_action_{n_act-1}
-
-    This reveals which state features drive the actor's output probabilities,
-    complementing the action-selection correlation with a softer, continuous
-    signal that is not available for value-based algorithms.
-
-    Only columns with non-zero variance are included.
-    """
-    prob_cols = [f"prob_action_{i}" for i in range(n_act)
-                 if f"prob_action_{i}" in df.columns]
-    if not prob_cols:
-        print(f"  [skip] {algo}: no prob_action_* columns for probability correlation plot.")
-        return
-
-    feat_cols = [col for col, _, _ in FEAT_META if col in df.columns]
-    if not feat_cols:
-        print(f"  [skip] {algo}: no feature columns.")
-        return
-
-    sub_feat = df[feat_cols].select_dtypes(include="number")
-    sub_feat = sub_feat.loc[:, sub_feat.std() > 0]
-    sub_prob = df[prob_cols].select_dtypes(include="number")
-    sub_prob = sub_prob.loc[:, sub_prob.std() > 0]
-
-    if sub_feat.empty or sub_prob.empty:
-        print(f"  [skip] {algo}: zero-variance columns, cannot compute correlation.")
-        return
-
-    corr = sub_feat.join(sub_prob).corr().loc[sub_feat.columns, sub_prob.columns]
-
-    feat_lbl_map = {col: lbl for col, lbl, _ in FEAT_META}
-    row_labels   = [feat_lbl_map.get(r, r) for r in corr.index]
-    short_cols   = [c.replace("prob_action_", "a") for c in corr.columns]
-
-    fig_h = max(6, len(row_labels) * 0.35)
-    fig_w = max(8, len(short_cols) * 0.4)
-    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
-    im = ax.imshow(corr.values, cmap="coolwarm", vmin=-1, vmax=1, aspect="auto")
-    plt.colorbar(im, ax=ax, label="Pearson correlation")
-
-    ax.set_xticks(range(len(short_cols)))
-    ax.set_xticklabels(short_cols, fontsize=7, rotation=45)
-    ax.set_yticks(range(len(row_labels)))
-    ax.set_yticklabels(row_labels, fontsize=7)
-    ax.set_title(
-        f"{algo}  -  Feature <-> Policy Probability  (full log, {len(df):,} rows)\n"
-        "Correlation between state features and actor output probabilities",
-        fontsize=10, fontweight="bold",
-    )
-
-    fig.tight_layout()
-    out = os.path.join(out_dir, f"{algo}_step{step_id}_feat_prob_corr.png")
-    fig.savefig(out, bbox_inches="tight")
-    plt.close(fig)
-    print(f"    -> {out}")
-
-
 # ── Summary statistics: advantage vs regret ───────────────────────────────────
 
 def regime_summary(dfs: dict[str, pd.DataFrame]) -> pd.DataFrame:
@@ -933,10 +697,8 @@ def main():
             "Supports value-based (DQN, Envelope) and policy-based (PPO, A2C, EUPG).\n\n"
             "Plot routing per algorithm:\n"
             "  Envelope / EUPG : q_landscape, q_diff, pairwise_rdx, state_context,\n"
-            "                    feat_action_corr\n"
-            "                    + feat_q_corr (Envelope) / feat_prob_corr (EUPG)\n"
-            "  DQN             : state_context, feat_action_corr, feat_q_corr\n"
-            "  PPO / A2C       : state_context, feat_action_corr, feat_prob_corr"
+            "  DQN             : state_context\n"
+            "  PPO / A2C       : state_context"
         )
     )
     parser.add_argument("--envelope",      default=None,
@@ -1015,23 +777,12 @@ def main():
         # State context -- ALL algorithms
         plot_state_context(row, algo, step_id, args.out)
 
-        # Feature <-> Action Selection -- ALL algorithms
-        plot_feat_action_corr(df, n_act, algo, step_id, args.out)
-
         # MORL-only plots: Q-landscape, Q-diff, pairwise RDX, pairwise ranking
         if algo in MORL_ALGOS:
             plot_q_landscape(row, n_act, algo, step_id, args.out)
             plot_q_diff(row, n_act, algo, step_id, args.out)
             plot_pairwise_rdx(row, n_act, algo, step_id, args.out)
             print_pairwise_ranking(row, n_act, algo, step_id, top_k=args.top_k)
-
-        # Feature <-> Q-value -- value-based only (DQN, Envelope)
-        if algo in VALUE_BASED_ALGOS:
-            plot_feat_q_corr(df, n_act, algo, step_id, args.out)
-
-        # Feature <-> Policy Probability -- policy-based only (PPO, A2C, EUPG)
-        if algo in POLICY_BASED_ALGOS:
-            plot_feat_prob_corr(df, n_act, algo, step_id, args.out)
 
     # ── Cross-algorithm regime summary ─────────────────────────────────────
     print("\n-- Regime summary (advantage vs regret) --")
