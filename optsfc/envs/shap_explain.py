@@ -4,7 +4,7 @@ SHAP Analysis for RL Decision Explanation
 Two-layer SHAP design:
 
   SHAP (for all):
-    X = 22 state features (feat_*)
+    X = 21 state features (feat_*)
     Y = match (0/1) for every action pair
     → Binary classification: did the agent choose the "better" action?
 
@@ -41,14 +41,13 @@ FEATURE_COLS = [
     "feat_max_dataleak_score", "feat_mean_dataleak_score",
     "feat_max_dos_score", "feat_mean_dos_score",
     "feat_mean_security_penalty", "feat_max_security_penalty",
-    "feat_security_penalty_cumul",
+    # "feat_security_penalty_cumul",
     "feat_mean_network_penalty", "feat_max_network_penalty",
     "feat_mean_mtd_overhead",
     "feat_min_remaining_mig", "feat_mean_remaining_mig",
     "feat_min_remaining_reinst", "feat_mean_remaining_reinst",
-    # "feat_steps_since_last_mtd",
     "feat_total_ues", "feat_nb_resources",
-]  # 22 features
+]  # 21 features
 
 N_ACTIONS = 12
 ACTION_COLS_PROB   = [f"prob_action_{i}"   for i in range(N_ACTIONS)]
@@ -79,7 +78,7 @@ def run_universal_shap(df: pd.DataFrame, output_dir: str = "."):
     Layer 1: per-action binary classification SHAP.
 
     For each action_i (0..N_ACTIONS-1), train a separate classifier where:
-        X = 22 state features
+        X = 21 state features
         Y = 1 if env_action == action_i, else 0
 
     All 12 classifiers are merged into one CSV with columns:

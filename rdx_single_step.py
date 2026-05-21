@@ -116,7 +116,7 @@ FEAT_META = [
     ("feat_mean_dos_score",         "Mean DoS Score",          "Security"),
     ("feat_mean_security_penalty",  "Mean Sec. Penalty",       "Security"),
     ("feat_max_security_penalty",   "Max Sec. Penalty",        "Security"),
-    ("feat_security_penalty_cumul", "Cumul. Sec. Penalty",     "Security"),
+    # ("feat_security_penalty_cumul", "Cumul. Sec. Penalty",     "Security"),
     ("feat_mean_network_penalty",   "Mean Net. Penalty",       "Network"),
     ("feat_max_network_penalty",    "Max Net. Penalty",        "Network"),
     ("feat_mean_mtd_overhead",      "Mean MTD Overhead",       "MTD Budget"),
@@ -124,7 +124,6 @@ FEAT_META = [
     ("feat_mean_remaining_mig",     "Mean Remaining Mig.",     "MTD Budget"),
     ("feat_min_remaining_reinst",   "Min Remaining Reinst.",   "MTD Budget"),
     ("feat_mean_remaining_reinst",  "Mean Remaining Reinst.",  "MTD Budget"),
-    # ("feat_steps_since_last_mtd",   "Steps Since Last MTD",    "Temporal"),
     ("feat_total_ues",              "Total UEs",               "Temporal"),
     ("feat_nb_resources",           "Nb. Resources",           "Temporal"),
 ]

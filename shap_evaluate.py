@@ -65,12 +65,11 @@ FEATURE_COLS = [
     "feat_max_dataleak_score", "feat_mean_dataleak_score",
     "feat_max_dos_score", "feat_mean_dos_score",
     "feat_mean_security_penalty", "feat_max_security_penalty",
-    "feat_security_penalty_cumul",
+    # "feat_security_penalty_cumul",
     "feat_mean_network_penalty", "feat_max_network_penalty",
     "feat_mean_mtd_overhead",
     "feat_min_remaining_mig", "feat_mean_remaining_mig",
     "feat_min_remaining_reinst", "feat_mean_remaining_reinst",
-    # "feat_steps_since_last_mtd",
     "feat_total_ues", "feat_nb_resources",
 ]
 SHORT_NAMES = {f: f.replace("feat_", "").replace("_", "\n") for f in FEATURE_COLS}
@@ -146,7 +145,7 @@ class SHAPVisualizer:
     def plot_universal_per_algo(self):
         """One bar chart per algo showing top-K features by mean |SHAP|."""
         print("\n[1] Universal SHAP — per-algo importance bars")
-        fig, axes = plt.subplots(1, len(ALGOS), figsize=(22, 6), sharey=False)
+        fig, axes = plt.subplots(1, len(ALGOS), figsize=(21, 6), sharey=False)
         fig.suptitle("Universal SHAP: Top Feature Importance per Algorithm\n"
                      "(mean |SHAP| averaged over all 12 actions)", fontsize=13, y=1.02)
 
@@ -250,7 +249,7 @@ class SHAPVisualizer:
     def plot_custom_signed_bars(self):
         """Signed mean SHAP bars: positive = pushes target up, negative = down."""
         print("\n[4] Customized SHAP — signed mean SHAP bars")
-        fig, axes = plt.subplots(1, len(ALGOS), figsize=(22, 6), sharey=False)
+        fig, axes = plt.subplots(1, len(ALGOS), figsize=(21, 6), sharey=False)
         fig.suptitle("Customized SHAP: Signed Mean SHAP per Algorithm\n"
                      "(positive → increases target; negative → decreases target)",
                      fontsize=13, y=1.02)
@@ -471,7 +470,7 @@ class SHAPVisualizer:
         if len(data_dict) < 2:
             return
 
-        matrix = pd.DataFrame(data_dict)          # (22 features, N algos)
+        matrix = pd.DataFrame(data_dict)          # (21 features, N algos)
         mean_imp = matrix.mean(axis=1)
         std_imp  = matrix.std(axis=1)
 
@@ -524,7 +523,7 @@ class SHAPVisualizer:
         Customized SHAP using a scatter plot (rank in universal vs rank in custom).
         """
         print("\n[10] Universal vs Customized SHAP agreement per algo")
-        fig, axes = plt.subplots(1, len(ALGOS), figsize=(22, 5))
+        fig, axes = plt.subplots(1, len(ALGOS), figsize=(21, 5))
         fig.suptitle("Universal vs Customized SHAP: Feature Rank Agreement per Algorithm",
                      fontsize=13, y=1.02)
 
