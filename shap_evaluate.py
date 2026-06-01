@@ -3,9 +3,6 @@ SHAP Analysis Visualization & Comparison
 =========================================
 Reads the SHAP output CSVs produced by shap_explain.py and generates:
 
-  1.  Universal SHAP — per-algo feature importance bar chart (top-K)
-  2.  Universal SHAP — cross-algo heatmap (feature rank correlation)
-  3.  Universal SHAP — per-action importance heatmap (action × feature)
   4.  Customized SHAP — per-algo summary bar chart (signed mean SHAP)
   5.  Customized SHAP — cross-algo scatter / radar (top features)
   6.  Envelope only  — objective influence pie + bar
@@ -15,12 +12,7 @@ Reads the SHAP output CSVs produced by shap_explain.py and generates:
 
 Usage
 -----
-  python shap_analysis_viz.py --data_root ./shap_outputs --out_dir ./figures
-
-  # Or import and call directly:
-  from shap_analysis_viz import SHAPVisualizer
-  viz = SHAPVisualizer("./shap_outputs")
-  viz.run_all()
+  python shap_evaluate.py --data_root ./shap_outputs --out_dir ./figures
 """
 
 import os
@@ -65,7 +57,6 @@ FEATURE_COLS = [
     "feat_max_dataleak_score", "feat_mean_dataleak_score",
     "feat_max_dos_score", "feat_mean_dos_score",
     "feat_mean_security_penalty", "feat_max_security_penalty",
-    # "feat_security_penalty_cumul",
     "feat_mean_network_penalty", "feat_max_network_penalty",
     "feat_mean_mtd_overhead",
     "feat_min_remaining_mig", "feat_mean_remaining_mig",
@@ -103,19 +94,6 @@ class SHAPVisualizer:
         plt.close(fig)
         print(f"  ✓ saved → {path}")
 
-    def _universal_summary(self, algo: str) -> pd.DataFrame | None:
-        """Merge per-action universal summaries → mean |SHAP| per feature."""
-        frames = []
-        for a in range(N_ACTIONS):
-            df = self._load(algo, f"shap_universal_summary_action{a}.csv")
-            if df is not None:
-                frames.append(df.set_index("feature")["mean_abs_shap"])
-        if not frames:
-            return None
-        merged = pd.concat(frames, axis=1).mean(axis=1).reset_index()
-        merged.columns = ["feature", "mean_abs_shap"]
-        return merged.sort_values("mean_abs_shap", ascending=False)
-
     def _custom_summary(self, algo: str) -> pd.DataFrame | None:
         """Load customized SHAP summary for an algo."""
         mapping = {
@@ -138,110 +116,6 @@ class SHAPVisualizer:
             return merged
         fname = mapping.get(algo)
         return self._load(algo, fname) if fname else None
-
-    # ══════════════════════════════════════════════════════════════════════
-    # 1.  Universal SHAP — per-algo feature importance bar chart
-    # ══════════════════════════════════════════════════════════════════════
-    def plot_universal_per_algo(self):
-        """One bar chart per algo showing top-K features by mean |SHAP|."""
-        print("\n[1] Universal SHAP — per-algo importance bars")
-        fig, axes = plt.subplots(1, len(ALGOS), figsize=(21, 6), sharey=False)
-        fig.suptitle("Universal SHAP: Top Feature Importance per Algorithm\n"
-                     "(mean |SHAP| averaged over all 12 actions)", fontsize=13, y=1.02)
-
-        for ax, algo in zip(axes, ALGOS):
-            df = self._universal_summary(algo)
-            if df is None:
-                ax.set_visible(False)
-                continue
-            top = df.head(self.top_k)
-            labels = [SHORT_NAMES.get(f, f) for f in top["feature"]]
-            vals   = top["mean_abs_shap"].values
-            color  = ALGO_COLORS[algo]
-            bars   = ax.barh(range(len(top)), vals, color=color, alpha=0.85, edgecolor="white")
-            ax.set_yticks(range(len(top)))
-            ax.set_yticklabels(labels, fontsize=7)
-            ax.invert_yaxis()
-            ax.set_title(algo.upper(), fontsize=11, color=color, fontweight="bold")
-            ax.set_xlabel("mean |SHAP|", fontsize=8)
-            ax.tick_params(axis="x", labelsize=7)
-            # value labels
-            for bar, v in zip(bars, vals):
-                ax.text(v * 1.02, bar.get_y() + bar.get_height() / 2,
-                        f"{v:.3f}", va="center", fontsize=6)
-
-        fig.tight_layout()
-        self._save(fig, "01_universal_per_algo_importance.png")
-
-    # ══════════════════════════════════════════════════════════════════════
-    # 2.  Universal SHAP — cross-algo feature importance heatmap
-    # ══════════════════════════════════════════════════════════════════════
-    def plot_universal_crossalgo_heatmap(self):
-        """Heatmap: features × algos, cell = mean |SHAP| (normalised per algo)."""
-        print("\n[2] Universal SHAP — cross-algo heatmap")
-        data_dict = {}
-        for algo in ALGOS:
-            df = self._universal_summary(algo)
-            if df is not None:
-                s = df.set_index("feature")["mean_abs_shap"]
-                data_dict[algo.upper()] = s / s.max()   # normalise 0-1 per algo
-
-        if not data_dict:
-            return
-        matrix = pd.DataFrame(data_dict).reindex(FEATURE_COLS).fillna(0)
-
-        fig, ax = plt.subplots(figsize=(10, 9))
-        im = ax.imshow(matrix.values, aspect="auto", cmap="YlOrRd", vmin=0, vmax=1)
-        plt.colorbar(im, ax=ax, label="Normalised mean |SHAP|")
-
-        ax.set_xticks(range(len(matrix.columns)))
-        ax.set_xticklabels(matrix.columns, fontsize=10)
-        ax.set_yticks(range(len(matrix.index)))
-        ax.set_yticklabels([SHORT_NAMES.get(f, f).replace("\n", " ")
-                            for f in matrix.index], fontsize=7.5)
-        ax.set_title("Universal SHAP: Normalised Feature Importance Across Algorithms",
-                     fontsize=12, pad=12)
-
-        # annotate cells
-        for i in range(matrix.shape[0]):
-            for j in range(matrix.shape[1]):
-                v = matrix.values[i, j]
-                ax.text(j, i, f"{v:.2f}", ha="center", va="center",
-                        fontsize=6, color="black" if v < 0.6 else "white")
-
-        fig.tight_layout()
-        self._save(fig, "02_universal_crossalgo_heatmap.png")
-
-    # ══════════════════════════════════════════════════════════════════════
-    # 3.  Universal SHAP — per-action importance heatmap (one algo)
-    # ══════════════════════════════════════════════════════════════════════
-    def plot_universal_action_heatmap(self):
-        """For each algo: actions × features heatmap of mean |SHAP|."""
-        print("\n[3] Universal SHAP — per-action × feature heatmap")
-        for algo in ALGOS:
-            rows = {}
-            for a in range(N_ACTIONS):
-                df = self._load(algo, f"shap_universal_summary_action{a}.csv")
-                if df is not None:
-                    rows[a] = df.set_index("feature")["mean_abs_shap"]
-            if not rows:
-                continue
-            matrix = pd.DataFrame(rows).T.reindex(columns=FEATURE_COLS).fillna(0)
-            # normalise per action
-            matrix_norm = matrix.div(matrix.max(axis=1).replace(0, 1), axis=0)
-
-            fig, ax = plt.subplots(figsize=(14, 5))
-            im = ax.imshow(matrix_norm.values, aspect="auto", cmap="Blues", vmin=0, vmax=1)
-            plt.colorbar(im, ax=ax, label="Normalised mean |SHAP|")
-            ax.set_yticks(range(N_ACTIONS))
-            ax.set_yticklabels([f"Action {i}" for i in range(N_ACTIONS)], fontsize=8)
-            ax.set_xticks(range(len(FEATURE_COLS)))
-            ax.set_xticklabels([SHORT_NAMES[f].replace("\n", "\n") for f in FEATURE_COLS],
-                               fontsize=6, rotation=45, ha="right")
-            ax.set_title(f"{algo.upper()} — Universal SHAP: Action × Feature Importance",
-                         fontsize=11, color=ALGO_COLORS[algo], pad=10)
-            fig.tight_layout()
-            self._save(fig, f"03_universal_action_heatmap_{algo}.png")
 
     # ══════════════════════════════════════════════════════════════════════
     # 4.  Customized SHAP — signed mean SHAP bar chart per algo
@@ -514,54 +388,6 @@ class SHAPVisualizer:
         fig.tight_layout()
         self._save(fig, "09_crossalgo_divergence.png")
 
-    # ══════════════════════════════════════════════════════════════════════
-    # 10.  BONUS — Universal vs Customized agreement per algo
-    # ══════════════════════════════════════════════════════════════════════
-    def plot_universal_vs_custom(self):
-        """
-        For each algo, compare the feature ranking from Universal SHAP vs
-        Customized SHAP using a scatter plot (rank in universal vs rank in custom).
-        """
-        print("\n[10] Universal vs Customized SHAP agreement per algo")
-        fig, axes = plt.subplots(1, len(ALGOS), figsize=(21, 5))
-        fig.suptitle("Universal vs Customized SHAP: Feature Rank Agreement per Algorithm",
-                     fontsize=13, y=1.02)
-
-        for ax, algo in zip(axes, ALGOS):
-            univ_df = self._universal_summary(algo)
-            cust_df = self._custom_summary(algo)
-            if univ_df is None or cust_df is None:
-                ax.set_visible(False)
-                continue
-
-            univ_ranks = univ_df.set_index("feature")["mean_abs_shap"].rank(ascending=False)
-            cust_ranks = cust_df.set_index("feature")["mean_abs_shap"].rank(ascending=False)
-
-            common = univ_ranks.index.intersection(cust_ranks.index)
-            x = univ_ranks[common].values
-            y = cust_ranks[common].values
-
-            corr, _ = spearmanr(x, y)
-            ax.scatter(x, y, color=ALGO_COLORS[algo], alpha=0.7, s=60, edgecolors="white")
-            # label top features
-            for feat in common:
-                if cust_ranks[feat] <= 5 or univ_ranks[feat] <= 5:
-                    ax.annotate(SHORT_NAMES.get(feat, feat).replace("\n", " "),
-                                (univ_ranks[feat], cust_ranks[feat]),
-                                fontsize=5.5, ha="center",
-                                xytext=(2, 2), textcoords="offset points")
-
-            # diagonal
-            lim = max(ax.get_xlim()[1], ax.get_ylim()[1])
-            ax.plot([1, lim], [1, lim], "k--", linewidth=0.7, alpha=0.4)
-            ax.set_xlabel("Universal rank", fontsize=8)
-            ax.set_ylabel("Customized rank", fontsize=8)
-            ax.set_title(f"{algo.upper()}\nSpearman ρ={corr:.2f}",
-                         fontsize=10, color=ALGO_COLORS[algo], fontweight="bold")
-            ax.tick_params(labelsize=7)
-
-        fig.tight_layout()
-        self._save(fig, "10_universal_vs_custom_rank.png")
 
     # ══════════════════════════════════════════════════════════════════════
     # 11. Summary dashboard: top-5 features per algo side-by-side
@@ -629,16 +455,12 @@ class SHAPVisualizer:
         print(f"  Output dir: {self.out_dir}")
         print(f"{'='*60}")
 
-        self.plot_universal_per_algo()           # 1
-        self.plot_universal_crossalgo_heatmap()  # 2
-        self.plot_universal_action_heatmap()     # 3
         self.plot_custom_signed_bars()           # 4
         self.plot_custom_radar()                 # 5
         self.plot_envelope_objective_influence() # 6
         self.plot_envelope_per_objective()       # 7
         self.plot_rank_correlation()             # 8
         self.plot_importance_divergence()        # 9
-        self.plot_universal_vs_custom()          # 10
         self.plot_dashboard_summary()            # 11
 
         print(f"\n✓ All plots saved to: {self.out_dir}/")
@@ -661,16 +483,6 @@ if __name__ == "__main__":
         "--top_k", type=int, default=12,
         help="Number of top features to display (default: 12)"
     )
-    parser.add_argument(
-        "--plot", default="all",
-        help=(
-            "Which plot(s) to generate. Use 'all' or comma-separated numbers, "
-            "e.g. '1,4,8'  (1=universal bars, 2=crossalgo heatmap, "
-            "3=action heatmap, 4=signed bars, 5=radar, 6=envelope influence, "
-            "7=envelope objectives, 8=spearman, 9=divergence, "
-            "10=univ vs custom, 11=dashboard)"
-        )
-    )
     args = parser.parse_args()
 
     viz = SHAPVisualizer(args.data_root, args.out_dir, args.top_k)
@@ -679,16 +491,12 @@ if __name__ == "__main__":
         viz.run_all()
     else:
         plot_map = {
-            "1":  viz.plot_universal_per_algo,
-            "2":  viz.plot_universal_crossalgo_heatmap,
-            "3":  viz.plot_universal_action_heatmap,
             "4":  viz.plot_custom_signed_bars,
             "5":  viz.plot_custom_radar,
             "6":  viz.plot_envelope_objective_influence,
             "7":  viz.plot_envelope_per_objective,
             "8":  viz.plot_rank_correlation,
             "9":  viz.plot_importance_divergence,
-            "10": viz.plot_universal_vs_custom,
             "11": viz.plot_dashboard_summary,
         }
         for num in args.plot.split(","):

@@ -1,12 +1,7 @@
 """
 SHAP Analysis for RL Decision Explanation
 ==========================================
-Two-layer SHAP design:
-
-  SHAP (for all):
-    X = 21 state features (feat_*)
-    Y = match (0/1) for every action pair
-    → Binary classification: did the agent choose the "better" action?
+SHAP design:
 
   SHAP (customized) per algorithm:
     Envelope  → per-objective Q (resource / network / security) — signed Q value
@@ -41,7 +36,6 @@ FEATURE_COLS = [
     "feat_max_dataleak_score", "feat_mean_dataleak_score",
     "feat_max_dos_score", "feat_mean_dos_score",
     "feat_mean_security_penalty", "feat_max_security_penalty",
-    # "feat_security_penalty_cumul",
     "feat_mean_network_penalty", "feat_max_network_penalty",
     "feat_mean_mtd_overhead",
     "feat_min_remaining_mig", "feat_mean_remaining_mig",
@@ -70,75 +64,7 @@ def get_features(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# Layer 1 — Universal SHAP  (per-action, X=features, Y=match 0/1)
-# ---------------------------------------------------------------------------
-
-def run_universal_shap(df: pd.DataFrame, output_dir: str = "."):
-    """
-    Layer 1: per-action binary classification SHAP.
-
-    For each action_i (0..N_ACTIONS-1), train a separate classifier where:
-        X = 21 state features
-        Y = 1 if env_action == action_i, else 0
-
-    All 12 classifiers are merged into one CSV with columns:
-        action | feat_vim0_cpu | ... | shap_feat_vim0_cpu | ... | match
-
-    One summary CSV ranks features by mean |SHAP| averaged across all actions.
-    """
-    print("[Universal SHAP] Running per-action classifiers...")
-    feats = get_features(df)
-    X_raw = feats.values
-
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X_raw)
-
-    all_blocks = []
-
-    for action_i in range(N_ACTIONS):
-        Y = (df["env_action"].astype(int) == action_i).astype(int).values
-
-        model = GradientBoostingClassifier(
-            n_estimators=200, max_depth=4, random_state=42
-        )
-        model.fit(X_scaled, Y)
-
-        explainer = shap.TreeExplainer(model)
-        sv = explainer.shap_values(X_scaled)
-        # GradientBoostingClassifier: shap_values is (n_samples, n_features)
-        # older sklearn may return a list [class0, class1] — take class-1
-        if isinstance(sv, list):
-            sv = sv[1]
-
-        block = pd.DataFrame(X_raw, columns=FEATURE_COLS)
-        shap_block = pd.DataFrame(sv, columns=[f"shap_{f}" for f in FEATURE_COLS])
-        block = pd.concat([block, shap_block], axis=1)
-        block.insert(0, "action", action_i)
-        block["match"] = Y
-        all_blocks.append(block)
-
-        action_summary = pd.DataFrame({
-            "feature":       FEATURE_COLS,
-            "mean_abs_shap": np.abs(sv).mean(axis=0),
-            "mean_shap":     sv.mean(axis=0),
-        }).sort_values("mean_abs_shap", ascending=False)
-        action_summary_path = os.path.join(output_dir, f"shap_universal_summary_action{action_i}.csv")
-        action_summary.to_csv(action_summary_path, index=False)
-        print(f"  action {action_i:2d} done  "
-              f"(n_positive={Y.sum()}, n_negative={(1 - Y).sum()})")
-
-    # Merged CSV: N_steps × N_actions rows
-    merged = pd.concat(all_blocks, ignore_index=True)
-    out_path = os.path.join(output_dir, "shap_universal.csv")
-    merged.to_csv(out_path, index=False)
-    print(f"[Universal SHAP] Saved → {out_path}  "
-          f"({len(merged)} rows = {len(df)} steps × {N_ACTIONS} actions)")
-
-    return merged
-
-
-# ---------------------------------------------------------------------------
-# Layer 2 — Customized SHAP per algorithm
+# Customized SHAP per algorithm
 # ---------------------------------------------------------------------------
 
 # --- DQN: scalar Q (signed) -------------------------------------------------
@@ -394,18 +320,9 @@ ALGO_DISPATCHER = {
 
 
 def run_all(df: pd.DataFrame, output_dir: str = "shap_outputs"):
-    """
-    Run both SHAP layers for all algorithms present in the dataframe.
 
-    Layer 1 (universal) runs once on the full dataset.
-    Layer 2 (customized) runs per algorithm on its own subset.
-    """
     os.makedirs(output_dir, exist_ok=True)
 
-    # --- Layer 1: universal (all rows together) ---
-    run_universal_shap(df, output_dir)
-
-    # --- Layer 2: per algorithm ---
     algos_present = df["algo"].unique()
     for algo in algos_present:
         if algo not in ALGO_DISPATCHER:
