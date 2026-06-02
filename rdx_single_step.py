@@ -12,9 +12,7 @@ multi-objective RL (MORL) algorithms, including:
 Plot routing per algorithm
 ──────────────────────────
   Envelope / EUPG  →  q_landscape, q_diff, state_context, pairwise_rdx
-
   DQN              →  state_context
-
   PPO / A2C        →  state_context
 
 Usage
@@ -25,12 +23,11 @@ Usage
       --dqn      dqn_explain.csv     \
       --ppo      ppo_explain.csv     \
       --a2c      a2c_explain.csv     \
-      --step     42                  \   # omit for auto-selection
+      --step     42                  \
       --out      ./single_step_plots
 
 Step auto-selection (match=True rows only):
-  The step whose total absolute weighted Q-diff magnitude is largest,
-  i.e. argmax(|Δ_resource| + |Δ_network| + |Δ_security|).
+  The step whose total absolute weighted Q-diff magnitude is largest.
   For algorithms without diff columns, the first match=1 row is used.
 
 Outputs (algorithm-dependent)
@@ -64,54 +61,72 @@ WEIGHTS    = np.array([0.4, 0.3, 0.3])
 OBJ_NAMES  = ["Resource", "Network", "Security"]
 OBJ_COLORS = {"Resource": "#2196F3", "Network": "#FF9800", "Security": "#4CAF50"}
 
-# Algorithms that maintain explicit per-action Q-value estimates.
-# Receive: state_context.
-# Envelope additionally receives: q_landscape, q_diff, pairwise_rdx.
-VALUE_BASED_ALGOS = {"DQN", "Envelope"}
-
-# Algorithms that output an explicit probability distribution over actions.
-# Receive: state_context.
-# EUPG additionally receives: q_landscape, q_diff, pairwise_rdx.
+VALUE_BASED_ALGOS  = {"DQN", "Envelope"}
 POLICY_BASED_ALGOS = {"PPO", "A2C", "EUPG"}
+MORL_ALGOS         = {"Envelope", "EUPG"}
 
-# Algorithms that produce the full per-step Q-landscape / RDX plots.
-# DQN and PPO/A2C do not log per-action Q matrices in a multi-objective sense,
-# so those heavy plots are skipped for them.
-MORL_ALGOS = {"Envelope", "EUPG"}
+# ── State feature metadata ─────────────────────────────────────────────────────
+#
+# Classification rationale
+# ────────────────────────
+# Resource  VIM CPU/RAM: direct inputs to is_action_possible() and
+#             set_double_resource_allocation(); determine whether MTD can run.
+#           Mean MTD overhead: instantaneous economic spend ($ per step)
+#             during active MTD actions; non-zero only when mtd_action != 0.
+#             Distinct from VIM remaining (capacity headroom) — captures spend.
+#
+# Network   Mean/Max net. penalty: (1+p_loss)*latency; mean=overall QoS,
+#             max=worst-performing VNF (different optimal response needed).
+#           Min/Mean remaining mig.: SLA-constrained budget (downtime ~330ms
+#             per migration). Min captures the most-constrained VNF; mean
+#             gives overall budget health. Both needed: min=0 blocks action
+#             even when mean > 0. (Supervisor Q5: budget limit is QoS/SLA.)
+#           Mean remaining reinst.: same SLA basis; min excluded (std=0 in
+#             current data — reinstantiation budget never hits 0 in one episode).
+#           Total UEs: upstream driver of latency/throughput simulation;
+#             provides causal context penalty alone cannot give.
+#
+# Security  Mean/Max sec. penalty: max(asp*cvss)*impact_ssla; grows with
+#             recon counter, resets on MTD. Mean=overall threat, max=worst VNF.
+#             All upstream inputs (CVSS scores, impact_ssla) have std=0 —
+#             their effect is fully absorbed into the computed penalty.
+#
+# Excluded from FEAT_META (retained in rdx.py extract_state_features for
+# traceability / future use):
+#   feat_max/mean_apt/dataleak/dos_score  → std=0 (static catalogue)
+#   feat_min_remaining_reinst             → std=0 in current simulation data
+#   feat_security_penalty_cumul           → episode-level, not single-step
+#   feat_nb_resources                     → constant across episodes
 
-# 22 state features grouped by semantic category
 FEAT_META = [
-    # (column_name, display_label, category)
-    ("feat_vim0_cpu",               "VIM0 CPU",                "Resource Load"),
-    ("feat_vim0_ram",               "VIM0 RAM (GB)",           "Resource Load"),
-    ("feat_vim1_cpu",               "VIM1 CPU",                "Resource Load"),
-    ("feat_vim1_ram",               "VIM1 RAM (GB)",           "Resource Load"),
-    ("feat_max_apt_score",          "Max APT Score",           "Security"),
-    ("feat_mean_apt_score",         "Mean APT Score",          "Security"),
-    ("feat_max_dataleak_score",     "Max Data-Leak Score",     "Security"),
-    ("feat_mean_dataleak_score",    "Mean Data-Leak Score",    "Security"),
-    ("feat_max_dos_score",          "Max DoS Score",           "Security"),
-    ("feat_mean_dos_score",         "Mean DoS Score",          "Security"),
-    ("feat_mean_security_penalty",  "Mean Sec. Penalty",       "Security"),
-    ("feat_max_security_penalty",   "Max Sec. Penalty",        "Security"),
-    # ("feat_security_penalty_cumul", "Cumul. Sec. Penalty",     "Security"),
-    ("feat_mean_network_penalty",   "Mean Net. Penalty",       "Network"),
-    ("feat_max_network_penalty",    "Max Net. Penalty",        "Network"),
-    ("feat_mean_mtd_overhead",      "Mean MTD Overhead",       "MTD Budget"),
-    ("feat_min_remaining_mig",      "Min Remaining Mig.",      "MTD Budget"),
-    ("feat_mean_remaining_mig",     "Mean Remaining Mig.",     "MTD Budget"),
-    ("feat_min_remaining_reinst",   "Min Remaining Reinst.",   "MTD Budget"),
-    ("feat_mean_remaining_reinst",  "Mean Remaining Reinst.",  "MTD Budget"),
-    ("feat_total_ues",              "Total UEs",               "Temporal"),
-    ("feat_nb_resources",           "Nb. Resources",           "Temporal"),
+    # (column_name,                  display_label,           category)
+
+    # Resource
+    ("feat_vim0_cpu",               "VIM0 CPU",              "Resource"),
+    ("feat_vim0_ram",               "VIM0 RAM",              "Resource"),
+    ("feat_vim1_cpu",               "VIM1 CPU",              "Resource"),
+    ("feat_vim1_ram",               "VIM1 RAM",              "Resource"),
+    ("feat_mean_mtd_overhead",      "Mean MTD overhead",     "Resource"),
+
+    # Network
+    ("feat_mean_network_penalty",   "Mean net. penalty",     "Network"),
+    ("feat_max_network_penalty",    "Max net. penalty",      "Network"),
+    ("feat_min_remaining_mig",      "Min remaining mig.",    "Network"),
+    ("feat_mean_remaining_mig",     "Mean remaining mig.",   "Network"),
+    ("feat_mean_remaining_reinst",  "Mean remaining reinst.","Network"),
+    ("feat_total_ues",              "Total UEs",             "Network"),
+
+    # Security
+    ("feat_mean_security_penalty",  "Mean sec. penalty",     "Security"),
+    ("feat_max_security_penalty",   "Max sec. penalty",      "Security"),
 ]
 
+# Colour palette: one colour per category, consistent with OBJ_COLORS where
+# the category name matches an objective name.
 CATEGORY_COLORS = {
-    "Resource Load": "#2196F3",
-    "Security":      "#F44336",
-    "Network":       "#FF9800",
-    "MTD Budget":    "#9C27B0",
-    "Temporal":      "#607D8B",
+    "Resource": "#2196F3",   # blue  — matches OBJ_COLORS["Resource"]
+    "Network":  "#FF9800",   # amber — matches OBJ_COLORS["Network"]
+    "Security": "#4CAF50",   # green — matches OBJ_COLORS["Security"]
 }
 
 
@@ -128,13 +143,6 @@ def load_csv(path: str, label: str) -> pd.DataFrame | None:
 
 
 def n_actions(df: pd.DataFrame) -> int:
-    """
-    Infer the number of actions from logged columns, trying three formats
-    in order of precedence:
-      1. q_a{i}_resource  -- Envelope (MORL, per-objective Q)
-      2. q_a{i}_scalar    -- DQN (single-objective Q)
-      3. prob_action_{i}  -- PPO / A2C / EUPG (policy probability)
-    """
     for suffix in ("_resource", "_scalar"):
         cols = [c for c in df.columns
                 if c.startswith("q_a") and c.endswith(suffix)]
@@ -145,43 +153,23 @@ def n_actions(df: pd.DataFrame) -> int:
 
 
 def get_q_matrix(row: pd.Series, n_act: int) -> np.ndarray:
-    """
-    Extract an (n_actions, 3) Q matrix from a single log row.
-
-    Column format handling:
-      - q_a{i}_resource / _network / _security  ->  Envelope (MORL)
-      - q_a{i}_scalar                           ->  DQN; value broadcast to
-                                                     all three objective slots
-      - neither present                          ->  PPO / A2C (no per-action Q);
-                                                     returns zero matrix
-
-    Returns shape (n_act, 3) as float64.
-    """
     mat = np.zeros((n_act, 3), dtype=np.float64)
     for i in range(n_act):
         if f"q_a{i}_scalar" in row.index:
             v = float(row[f"q_a{i}_scalar"])
-            mat[i] = [v, v, v]          # single-objective: broadcast to all 3
+            mat[i] = [v, v, v]
         elif f"q_a{i}_resource" in row.index:
             mat[i, 0] = float(row[f"q_a{i}_resource"])
             mat[i, 1] = float(row[f"q_a{i}_network"])
             mat[i, 2] = float(row[f"q_a{i}_security"])
-        # else: policy-based with no per-action Q -- leave as zeros
     return mat
 
 
 def scalar_q(q_mat: np.ndarray) -> np.ndarray:
-    """Compute scalarised Q = Q @ WEIGHTS for each action. Shape (n_act,)."""
     return q_mat @ WEIGHTS
 
 
 def get_probs(row: pd.Series, n_act: int) -> np.ndarray | None:
-    """
-    Extract policy action probabilities from a log row.
-    Returns a float array of shape (n_act,), or None if the columns are absent.
-    Present for policy-based algorithms (PPO, A2C, EUPG); absent for
-    value-based algorithms (DQN, Envelope).
-    """
     cols = [f"prob_action_{i}" for i in range(n_act)]
     if not all(c in row.index for c in cols):
         return None
@@ -191,17 +179,6 @@ def get_probs(row: pd.Series, n_act: int) -> np.ndarray | None:
 # ── Step selection ─────────────────────────────────────────────────────────────
 
 def auto_select_step(df: pd.DataFrame, override: int | None) -> pd.Series:
-    """
-    Return the single log row for the highlighted step.
-
-    Manual override: the row whose "step" column equals `override`.
-    Auto-selection (match=True rows only):
-        argmax(|Delta_resource| + |Delta_network| + |Delta_security|)
-        -- the step where the agent's Q-value advantage/regret is largest
-           in absolute magnitude across all three objectives simultaneously.
-        For algorithms without diff columns (DQN, PPO, A2C), the first
-        match=1 row is used.
-    """
     if override is not None:
         matched = df[df["step"] == override]
         if not matched.empty:
@@ -223,18 +200,9 @@ def auto_select_step(df: pd.DataFrame, override: int | None) -> pd.Series:
 
 
 # ── Plot 1: Q-value landscape across all actions ──────────────────────────────
-# Used by: Envelope, EUPG  (MORL algorithms with full per-action Q logging)
 
 def plot_q_landscape(row: pd.Series, n_act: int, algo: str,
                      step_id: int, out_dir: str):
-    """
-    Grouped bar chart showing, for each action:
-      - weighted Q per objective (3 bars per action, side-by-side)
-      - scalarised Q as an overlaid line
-    Actions are sorted by descending scalar_Q.
-    Vertical dashed lines mark the executed action and the reference action.
-    For EUPG the policy probability is overlaid as a scaled dashed line.
-    """
     q_mat  = get_q_matrix(row, n_act)
     sq     = scalar_q(q_mat)
     probs  = get_probs(row, n_act)
@@ -261,7 +229,6 @@ def plot_q_landscape(row: pd.Series, n_act: int, algo: str,
     ax2.plot(x, sq[order], color="black", linewidth=1.8,
              marker="D", markersize=5, label="Scalar Q (line)", zorder=10)
 
-    # Policy probability overlay -- EUPG only
     if probs is not None:
         prob_sorted = probs[order]
         q_max = max(abs(sq)) if len(sq) > 0 else 1.0
@@ -291,7 +258,7 @@ def plot_q_landscape(row: pd.Series, n_act: int, algo: str,
     ax1.set_ylabel("Weighted Q per objective", fontsize=9)
     ax2.set_ylabel("Scalar Q  /  Policy prob", fontsize=9)
 
-    obj_patches = [Patch(facecolor=OBJ_COLORS[n], label=f"w*Q_{n}") for n in OBJ_NAMES]
+    obj_patches  = [Patch(facecolor=OBJ_COLORS[n], label=f"w*Q_{n}") for n in OBJ_NAMES]
     line_handles = [Line2D([0], [0], color="black", linewidth=1.8,
                             marker="D", markersize=5, label="Scalar Q")]
     if probs is not None:
@@ -314,16 +281,10 @@ def plot_q_landscape(row: pd.Series, n_act: int, algo: str,
     print(f"    -> {out}")
 
 
-# ── Plot 2: Per-objective Q-diff (executed vs reference) ─────────────────────
-# Used by: Envelope, EUPG  (MORL algorithms with weighted diff columns)
+# ── Plot 2: Per-objective Q-diff ──────────────────────────────────────────────
 
 def plot_q_diff(row: pd.Series, n_act: int, algo: str,
                 step_id: int, out_dir: str):
-    """
-    Bar chart: weighted Q-diff per objective between executed and reference
-    action.  Green = gain, Red = loss.
-    Annotated with match regime and action IDs.
-    """
     diff_cols = ["weighted_resource_diff", "weighted_network_diff",
                  "weighted_security_diff"]
     available = [c for c in diff_cols if c in row.index]
@@ -367,15 +328,15 @@ def plot_q_diff(row: pd.Series, n_act: int, algo: str,
     print(f"    -> {out}")
 
 
-# ── Plot 3: State context (22 feat_* features) ────────────────────────────────
-# Used by: ALL algorithms
+# ── Plot 3: State context ──────────────────────────────────────────────────────
 
 def plot_state_context(row: pd.Series, algo: str,
                        step_id: int, out_dir: str):
     """
-    Horizontal bar chart of all available feat_* features, colour-coded by
-    category.  Generated for all algorithms; the executed action ID is
-    annotated in the title.
+    Horizontal bar chart of FEAT_META features colour-coded by objective
+    category (Resource / Network / Security).
+    Only features listed in FEAT_META are shown; excluded features
+    (std=0, episode-level, etc.) are stored in the CSV but not plotted.
     """
     available = [(col, lbl, cat)
                  for col, lbl, cat in FEAT_META
@@ -407,7 +368,7 @@ def plot_state_context(row: pd.Series, algo: str,
 
     cat_handles = [Patch(facecolor=CATEGORY_COLORS[c], label=c)
                    for c in dict.fromkeys(cats)]
-    ax.legend(handles=cat_handles, title="Category", fontsize=7,
+    ax.legend(handles=cat_handles, title="Objective category", fontsize=7,
               title_fontsize=8, loc="lower right", framealpha=0.85)
 
     env_action = int(row["env_action"])
@@ -425,25 +386,10 @@ def plot_state_context(row: pd.Series, algo: str,
     print(f"    -> {out}")
 
 
-# ── Plot 4: Pairwise RDX heatmap ─────────────────────────────────────────────
-# Used by: Envelope, EUPG  (MORL algorithms with full per-action Q logging)
+# ── Plot 4: Pairwise RDX heatmap ──────────────────────────────────────────────
 
 def plot_pairwise_rdx(row: pd.Series, n_act: int, algo: str,
                       step_id: int, out_dir: str):
-    """
-    Pairwise RDX for the highlighted step.
-
-    For every ordered pair (a, b) with a != b:
-        overall_adv(a, b) = scalar_Q_a - scalar_Q_b
-
-    Displayed as an (n_act x n_act) heatmap: cell (a, b) = adv(a->b).
-    Positive (green): a is preferred over b.
-    Negative (red):   b is preferred over a.
-
-    The executed and reference actions are highlighted with axis tick markers.
-    Per-objective breakdown for the focal pair (executed vs reference) is shown
-    in the right panel.
-    """
     q_mat    = get_q_matrix(row, n_act)
     sq       = scalar_q(q_mat)
     wq       = q_mat * WEIGHTS
@@ -522,14 +468,9 @@ def plot_pairwise_rdx(row: pd.Series, n_act: int, algo: str,
     print(f"    -> {out}")
 
 
-# ── Summary statistics: advantage vs regret ───────────────────────────────────
+# ── Summary statistics ────────────────────────────────────────────────────────
 
 def regime_summary(dfs: dict[str, pd.DataFrame]) -> pd.DataFrame:
-    """
-    Compute per-algorithm, per-regime (advantage / regret) summary statistics
-    for the three weighted Q-diff columns.
-    Returns a DataFrame saved to {out}/regime_summary.csv.
-    """
     rows = []
     for algo, df in dfs.items():
         if df is None or df.empty:
@@ -562,16 +503,10 @@ def regime_summary(dfs: dict[str, pd.DataFrame]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-# ── Top-k pairwise ranking table ──────────────────────────────────────────────
+# ── Top-k pairwise ranking ────────────────────────────────────────────────────
 
 def print_pairwise_ranking(row: pd.Series, n_act: int, algo: str,
                            step_id: int, top_k: int = 10):
-    """
-    Print the top-k and bottom-k action pairs ranked by overall advantage
-    (scalar_Q_a - scalar_Q_b) for the highlighted step.
-    Marks the focal pair (executed vs reference) with a star symbol.
-    Used by MORL algorithms (Envelope, EUPG) that log full Q matrices.
-    """
     q_mat = get_q_matrix(row, n_act)
     sq    = scalar_q(q_mat)
     wq    = q_mat * WEIGHTS
@@ -611,17 +546,9 @@ def print_pairwise_ranking(row: pd.Series, n_act: int, algo: str,
               f"{rec['focal']:>2}")
 
 
-# ── Per-step execution analysis text ─────────────────────────────────────────
+# ── Per-step analysis text ────────────────────────────────────────────────────
 
 def print_step_analysis(row: pd.Series, n_act: int, algo: str):
-    """
-    Print a structured text summary of the highlighted step.
-
-    For MORL algorithms (Envelope, EUPG) this includes the full scalar Q
-    ranking and weighted Q-diff breakdown.
-    For single-objective algorithms (DQN, PPO, A2C) the Q / prob section is
-    printed only when the relevant columns are present.
-    """
     q_mat  = get_q_matrix(row, n_act)
     sq     = scalar_q(q_mat)
     wq     = q_mat * WEIGHTS
@@ -639,11 +566,9 @@ def print_step_analysis(row: pd.Series, n_act: int, algo: str):
     print(f"  Executed action  : a{env_action}")
     print(f"  Reference action : a{ref_action}  "
           f"({'argmax scalar Q' if algo in VALUE_BASED_ALGOS else 'argmax prob'})")
-    print(f"  Match            : {match}  "
-          f"({'env chose the reference action' if match else 'env deviated from reference'})")
+    print(f"  Match            : {match}")
     print()
 
-    # Scalar Q ranking -- meaningful for DQN and MORL algorithms
     if n_act > 0 and any(sq != 0):
         print("  Scalar Q ranking (all actions):")
         order = np.argsort(sq)[::-1]
@@ -652,7 +577,6 @@ def print_step_analysis(row: pd.Series, n_act: int, algo: str):
                      " <- ref " if a == ref_action else "")
             print(f"    Rank {rank+1:2d}:  a{a:2d}  scalar_Q = {sq[a]:+9.3f}{marker}")
 
-    # Policy probability -- policy-based algorithms (PPO, A2C, EUPG)
     if probs is not None:
         print("\n  Policy probabilities (all actions):")
         porder = np.argsort(probs)[::-1]
@@ -661,7 +585,6 @@ def print_step_analysis(row: pd.Series, n_act: int, algo: str):
                      " <- ref " if a == ref_action else "")
             print(f"    Rank {rank+1:2d}:  a{a:2d}  prob = {probs[a]:.6f}{marker}")
 
-    # Weighted Q-diff -- MORL algorithms only (diff columns present)
     diff_cols_present = any(c in row.index for c in [
         "weighted_resource_diff", "weighted_network_diff", "weighted_security_diff"])
     if diff_cols_present and n_act > 0 and any(sq != 0):
@@ -674,7 +597,6 @@ def print_step_analysis(row: pd.Series, n_act: int, algo: str):
         print(f"    {'Overall':>10}: {overall:+9.3f}")
     print()
 
-    # State context highlights (top 5 by absolute value) -- all algorithms
     feat_avail = [(col, lbl, cat)
                   for col, lbl, cat in FEAT_META
                   if col in row.index and pd.notna(row[col])]
@@ -684,7 +606,7 @@ def print_step_analysis(row: pd.Series, n_act: int, algo: str):
         top5 = sorted(vals_abs, reverse=True)[:5]
         print("  Top-5 state features by absolute magnitude:")
         for _, col, lbl, cat in top5:
-            print(f"    [{cat:>13}]  {lbl:<28} = {float(row[col]):.4f}")
+            print(f"    [{cat:>10}]  {lbl:<30} = {float(row[col]):.4f}")
     print()
 
 
@@ -695,44 +617,28 @@ def main():
         description=(
             "Single-Step RDX Analysis for RL / MORL algorithms.\n"
             "Supports value-based (DQN, Envelope) and policy-based (PPO, A2C, EUPG).\n\n"
-            "Plot routing per algorithm:\n"
-            "  Envelope / EUPG : q_landscape, q_diff, pairwise_rdx, state_context,\n"
-            "  DQN             : state_context\n"
-            "  PPO / A2C       : state_context"
+            "Plot routing:\n"
+            "  Envelope / EUPG : q_landscape, q_diff, pairwise_rdx, state_context\n"
+            "  DQN / PPO / A2C : state_context"
         )
     )
-    parser.add_argument("--envelope",      default=None,
-                        help="Path to Envelope explain CSV  [value-based, MORL]")
-    parser.add_argument("--eupg",          default=None,
-                        help="Path to EUPG explain CSV  [policy-based, MORL]")
-    parser.add_argument("--dqn",           default=None,
-                        help="Path to DQN explain CSV  [value-based, single-objective]")
-    parser.add_argument("--ppo",           default=None,
-                        help="Path to PPO explain CSV  [policy-based, single-objective]")
-    parser.add_argument("--a2c",           default=None,
-                        help="Path to A2C explain CSV  [policy-based, single-objective]")
-    parser.add_argument("--step",          type=int, default=None,
-                        help="Manually pin the step to highlight (all algos). "
-                             "Omit for auto-selection.")
-    parser.add_argument("--step-envelope", type=int, default=None,
-                        help="Step override for Envelope only.")
-    parser.add_argument("--step-eupg",     type=int, default=None,
-                        help="Step override for EUPG only.")
-    parser.add_argument("--step-dqn",      type=int, default=None,
-                        help="Step override for DQN only.")
-    parser.add_argument("--step-ppo",      type=int, default=None,
-                        help="Step override for PPO only.")
-    parser.add_argument("--step-a2c",      type=int, default=None,
-                        help="Step override for A2C only.")
-    parser.add_argument("--out",           default="./single_step_plots",
-                        help="Output directory for png plots")
-    parser.add_argument("--top-k",         type=int, default=10,
-                        help="Top-k pairs to print in pairwise ranking (MORL only)")
+    parser.add_argument("--envelope",      default=None)
+    parser.add_argument("--eupg",          default=None)
+    parser.add_argument("--dqn",           default=None)
+    parser.add_argument("--ppo",           default=None)
+    parser.add_argument("--a2c",           default=None)
+    parser.add_argument("--step",          type=int, default=None)
+    parser.add_argument("--step-envelope", type=int, default=None)
+    parser.add_argument("--step-eupg",     type=int, default=None)
+    parser.add_argument("--step-dqn",      type=int, default=None)
+    parser.add_argument("--step-ppo",      type=int, default=None)
+    parser.add_argument("--step-a2c",      type=int, default=None)
+    parser.add_argument("--out",           default="./single_step_plots")
+    parser.add_argument("--top-k",         type=int, default=10)
     args = parser.parse_args()
 
     os.makedirs(args.out, exist_ok=True)
 
-    # ── Load data ──────────────────────────────────────────────────────────
     print("\n-- Loading CSV files --")
     dfs = {}
     if args.envelope: dfs["Envelope"] = load_csv(args.envelope, "Envelope")
@@ -745,7 +651,6 @@ def main():
         print("No CSV files loaded. Provide at least one algorithm flag.")
         sys.exit(1)
 
-    # Per-algorithm step overrides
     step_overrides = {
         "Envelope": args.step_envelope,
         "EUPG":     args.step_eupg,
@@ -754,37 +659,28 @@ def main():
         "A2C":      args.step_a2c,
     }
 
-    # ── Per-algorithm analysis ─────────────────────────────────────────────
     for algo, df in dfs.items():
         if df is None or df.empty:
             continue
 
         print(f"\n-- {algo} --")
-
         step_override = step_overrides.get(algo) or args.step
         row     = auto_select_step(df, step_override)
         step_id = int(row["step"])
         n_act   = n_actions(df)
 
         print(f"  Highlighted step: {step_id}  (n_actions = {n_act})")
-
-        # Text analysis (adapts output to available columns)
         print_step_analysis(row, n_act, algo)
 
-        # ── png plots (routing by algorithm) ──────────────────────────────
         print(f"\n  Generating plots -> {args.out}/")
-
-        # State context -- ALL algorithms
         plot_state_context(row, algo, step_id, args.out)
 
-        # MORL-only plots: Q-landscape, Q-diff, pairwise RDX, pairwise ranking
         if algo in MORL_ALGOS:
             plot_q_landscape(row, n_act, algo, step_id, args.out)
             plot_q_diff(row, n_act, algo, step_id, args.out)
             plot_pairwise_rdx(row, n_act, algo, step_id, args.out)
             print_pairwise_ranking(row, n_act, algo, step_id, top_k=args.top_k)
 
-    # ── Cross-algorithm regime summary ─────────────────────────────────────
     print("\n-- Regime summary (advantage vs regret) --")
     summary = regime_summary(dfs)
     if not summary.empty:

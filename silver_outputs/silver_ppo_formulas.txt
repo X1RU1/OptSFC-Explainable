@@ -1,0 +1,32 @@
+Feature mapping: {0: 'feat_mean_mtd_overhead', 1: 'feat_mean_network_penalty', 2: 'feat_max_network_penalty', 3: 'feat_mean_security_penalty', 4: 'feat_max_security_penalty'}
+
+=== Decision Tree ===
+|--- feat_max_security_penalty <= 4.59
+|   |--- feat_mean_security_penalty <= 2.80
+|   |   |--- class: 8
+|   |--- feat_mean_security_penalty >  2.80
+|   |   |--- feat_max_network_penalty <= 2.80
+|   |   |   |--- class: 8
+|   |   |--- feat_max_network_penalty >  2.80
+|   |   |   |--- class: 2
+|--- feat_max_security_penalty >  4.59
+|   |--- feat_mean_security_penalty <= 2.97
+|   |   |--- class: 9
+|   |--- feat_mean_security_penalty >  2.97
+|   |   |--- feat_mean_security_penalty <= 3.10
+|   |   |   |--- feat_mean_network_penalty <= 0.01
+|   |   |   |   |--- class: 5
+|   |   |   |--- feat_mean_network_penalty >  0.01
+|   |   |   |   |--- class: 8
+|   |   |--- feat_mean_security_penalty >  3.10
+|   |   |   |--- class: 5
+
+
+=== Linear Regression ===
+f(x) = 7.9173e+02 + 1.3887e+00·x2 - 3.9902e-01·x3 - 6.7314e+02·x4 + 2.4033e+02·x5
+
+=== Logistic Regression ===
+f_2(x) = -2.2958e+00 - 2.1292e-03·x1 - 1.5752e-01·x2 + 7.4611e-01·x3 - 8.8445e-02·x4 - 1.6755e-01·x5
+f_5(x) = -9.9809e+00 - 4.5747e-03·x1 - 7.1896e-02·x2 - 4.5609e-01·x3 + 5.6529e-01·x4 + 1.7336e+00·x5
+f_8(x) = 6.2302e+00 + 3.5126e-03·x1 + 3.7442e-01·x2 + 9.2165e-02·x3 - 2.3385e-01·x4 - 8.3241e-01·x5
+f_9(x) = 6.0465e+00 + 3.1913e-03·x1 - 1.4500e-01·x2 - 3.8218e-01·x3 - 2.4299e-01·x4 - 7.3362e-01·x5

@@ -56,11 +56,11 @@ from matplotlib.lines import Line2D
 # ── 0. CONFIGURATION ──────────────────────────────────────────────────────────
 
 CSV_FILES = {
-    # "A2C":      "a2c_explain.csv",
-    # "DQN":      "dqn_explain.csv",
+    "A2C":      "a2c_explain.csv",
+    "DQN":      "dqn_explain.csv",
     "Envelope": "envelope_explain.csv",
     "EUPG":     "eupg_explain.csv",
-    # "PPO":      "ppo_explain.csv",
+    "PPO":      "ppo_explain.csv",
 }
 
 # ── Single-Step RDX override (MORL algorithms only) ──────────────────────────

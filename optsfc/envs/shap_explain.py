@@ -1,339 +1,358 @@
 """
 SHAP Analysis for RL Decision Explanation
 ==========================================
-SHAP design:
+Purpose
+-------
+Compute SHAP feature attributions to answer:
+    "Which objective-related factors most influence the policy?"
 
-  SHAP (customized) per algorithm:
-    Envelope  → per-objective Q (resource / network / security) — signed Q value
-    EUPG      → policy probability π(a_i, a_j)                  — probability ∈ (0,1)
-    DQN       → scalar Q                                         — signed Q value
-    PPO       → policy probability                               — probability ∈ (0,1)
-    A2C       → policy probability                               — probability ∈ (0,1)
+This is a preparatory step for SILVER (Shapley value-based Interpretable
+policy Via Explanation Regression), which builds a global interpretable
+surrogate policy from per-state Shapley vectors Φ_s.
 
-  Note on sign:
-    Q values (DQN, Envelope) are kept signed — positive/negative Q is meaningful.
-    Probabilities (EUPG, PPO, A2C) are naturally ∈ (0,1), no transformation needed.
+Methodology (aligned with SILVER paper)
+-----------------------------------------
+The paper uses shap.DeepExplainer directly on the policy network:
+
+    shap_values shape: (N, n_features, n_actions)
+    shap_chosen shape: (N, n_features)   ← shap_values[i, :, chosen_action[i]]
+
+Since we operate on CSV (no network objects), we replicate the same logic
+using shap.KernelExplainer with a lookup function that maps X → all-action
+Q/prob vector, then slice the chosen-action SHAP afterward.
+
+    Step 1: f(X) → (N, n_actions)  [Q values or probabilities, all actions]
+    Step 2: KernelExplainer produces shap_values: (N, n_features, n_actions)
+    Step 3: shap_chosen = shap_values[range(N), :, chosen_actions]
+                        → shape (N, n_features) = Φ_s per state
+
+Feature scope
+-------------
+Only the 5 objective-related state features are included.
+Constraint-related features are excluded (monotonic depletion signals
+that dominate SHAP magnitude without reflecting true policy drivers).
+
+    Category   Feature                 Column
+    --------   -------                 ------
+    Resource   Mean MTD overhead       feat_mean_mtd_overhead
+    Network    Mean network penalty    feat_mean_network_penalty
+    Network    Max  network penalty    feat_max_network_penalty
+    Security   Mean security penalty   feat_mean_security_penalty
+    Security   Max  security penalty   feat_max_security_penalty
+
+SHAP target per algorithm
+--------------------------
+    DQN       → all-action scalar Q vector,         shape (N, 12)
+    PPO/A2C/
+    EUPG      → all-action softmax prob vector,      shape (N, 12)
+    Envelope  → all-action per-objective Q vector,   shape (N, 12)
+                one independent SHAP run per objective (resource/network/security)
+
+Output files
+------------
+    shap_<tag>.csv         — Φ_s: per-state chosen-action SHAP, shape (N, n_features)
+    shap_<tag>_summary.csv — mean |SHAP| and mean signed SHAP per feature
+    shap_envelope_objective_influence.csv  (Envelope only)
+                           — weighted influence share per objective (%)
 """
+
+import os
+import warnings
 
 import numpy as np
 import pandas as pd
 import shap
-from sklearn.ensemble import GradientBoostingClassifier, GradientBoostingRegressor
-from sklearn.preprocessing import StandardScaler
-from typing import Optional
-import warnings
-import os
 
 warnings.filterwarnings("ignore")
 
 # ---------------------------------------------------------------------------
-# Constants
+# Objective-related features only (5 total)
 # ---------------------------------------------------------------------------
 
 FEATURE_COLS = [
-    "feat_vim0_cpu", "feat_vim0_ram", "feat_vim1_cpu", "feat_vim1_ram",
-    "feat_max_apt_score", "feat_mean_apt_score",
-    "feat_max_dataleak_score", "feat_mean_dataleak_score",
-    "feat_max_dos_score", "feat_mean_dos_score",
-    "feat_mean_security_penalty", "feat_max_security_penalty",
-    "feat_mean_network_penalty", "feat_max_network_penalty",
-    "feat_mean_mtd_overhead",
-    "feat_min_remaining_mig", "feat_mean_remaining_mig",
-    "feat_min_remaining_reinst", "feat_mean_remaining_reinst",
-    "feat_total_ues", "feat_nb_resources",
-]  # 21 features
+    "feat_mean_mtd_overhead",       # Resource: MTD operation cost
+    "feat_mean_network_penalty",    # Network:  mean penalty
+    "feat_max_network_penalty",     # Network:  max  penalty
+    "feat_mean_security_penalty",   # Security: mean penalty
+    "feat_max_security_penalty",    # Security: max  penalty
+]
 
 N_ACTIONS = 12
-ACTION_COLS_PROB   = [f"prob_action_{i}"   for i in range(N_ACTIONS)]
-ACTION_COLS_SCALAR = [f"q_a{i}_scalar"     for i in range(N_ACTIONS)]
+ACTION_COLS_PROB   = [f"prob_action_{i}" for i in range(N_ACTIONS)]
+ACTION_COLS_SCALAR = [f"q_a{i}_scalar"   for i in range(N_ACTIONS)]
 ENVELOPE_OBJECTIVES = ["resource", "network", "security"]
 
+# Envelope reward weights [resource, network, security]
+REWARDS_COEFF = [0.4, 0.3, 0.3]
+
+# KernelExplainer background sample size (1% of data, mirrors paper's DeepExplainer)
+BACKGROUND_RATIO = 0.01
+BACKGROUND_MIN   = 50
+
 # ---------------------------------------------------------------------------
-# Data loading helpers
+# Data helpers
 # ---------------------------------------------------------------------------
 
 def load_data(path: str) -> pd.DataFrame:
     return pd.read_csv(path)
 
 
-def get_features(df: pd.DataFrame) -> pd.DataFrame:
+def _get_features(df: pd.DataFrame) -> np.ndarray:
     missing = [c for c in FEATURE_COLS if c not in df.columns]
     if missing:
         raise ValueError(f"Missing feature columns: {missing}")
-    return df[FEATURE_COLS].copy()
+    return df[FEATURE_COLS].values.astype(np.float64)
+
+
+def _background(X: np.ndarray) -> np.ndarray:
+    """Select background dataset (1% of data, min BACKGROUND_MIN rows)."""
+    n = max(BACKGROUND_MIN, int(len(X) * BACKGROUND_RATIO))
+    n = min(n, len(X))
+    idx = np.random.default_rng(42).choice(len(X), size=n, replace=False)
+    return X[idx]
 
 
 # ---------------------------------------------------------------------------
-# Customized SHAP per algorithm
+# Core SHAP computation (paper-aligned)
 # ---------------------------------------------------------------------------
 
-# --- DQN: scalar Q (signed) -------------------------------------------------
+def _compute_shap_chosen(
+    X: np.ndarray,
+    action_matrix: np.ndarray,
+    chosen_actions: np.ndarray,
+) -> np.ndarray:
+    """
+    Replicate the paper's DeepExplainer logic using KernelExplainer.
+
+    Parameters
+    ----------
+    X              : (N, n_features) — objective-related state features
+    action_matrix  : (N, n_actions)  — Q values or probabilities for all actions
+    chosen_actions : (N,)            — index of the action actually taken
+
+    Returns
+    -------
+    shap_chosen : (N, n_features) — Φ_s, the per-state Shapley vector
+                  corresponding to the chosen action (same as paper's
+                  shap_values[sample_idx, :, actions])
+    """
+    bg = _background(X)
+
+    # f maps a feature matrix (M, n_features) → (M, n_actions)
+    # KernelExplainer calls f on subsets of X; we look up the precomputed
+    # action values by nearest neighbour in feature space (exact match for
+    # rows that exist in X, interpolated otherwise via the lookup table).
+    #
+    # Implementation: build a lookup from X rows → action_matrix rows.
+    # For unseen interpolated points (kernel perturbations), we use the
+    # closest row in X by L2 distance.
+    X_ref = X
+    Y_ref = action_matrix
+
+    def policy_fn(x_subset: np.ndarray) -> np.ndarray:
+        # x_subset: (M, n_features) — perturbed feature rows from KernelExplainer
+        # Find nearest neighbour in X_ref for each perturbed row
+        dists = np.sum((x_subset[:, None, :] - X_ref[None, :, :]) ** 2, axis=2)
+        nn_idx = np.argmin(dists, axis=1)
+        return Y_ref[nn_idx]  # (M, n_actions)
+
+    explainer = shap.KernelExplainer(policy_fn, bg)
+    sv_list   = explainer.shap_values(X, nsamples="auto", silent=True)
+
+    # KernelExplainer multi-output returns either:
+    #   (a) list of n_actions arrays each (N, n_features)  → np.array gives (n_actions, N, n_features)
+    #   (b) single array (N, n_features, n_actions)        → already correct
+    sv_arr = np.array(sv_list)  # stack everything into one array first
+
+    N, n_feat = X.shape
+    n_act     = action_matrix.shape[1]
+
+    if sv_arr.shape == (N, n_feat, n_act):
+        sv_3d = sv_arr                          # already (N, n_features, n_actions)
+    elif sv_arr.shape == (n_act, N, n_feat):
+        sv_3d = sv_arr.transpose(1, 2, 0)       # → (N, n_features, n_actions)
+    elif sv_arr.shape == (N, n_act, n_feat):
+        sv_3d = sv_arr.transpose(0, 2, 1)       # → (N, n_features, n_actions)
+    else:
+        raise ValueError(
+            f"Unexpected SHAP array shape {sv_arr.shape}. "
+            f"Expected one of: ({N},{n_feat},{n_act}), ({n_act},{N},{n_feat}), ({N},{n_act},{n_feat})"
+        )
+
+    # Slice chosen action — mirrors paper: shap_values[sample_idx, :, actions]
+    sample_idx  = np.arange(N)
+    shap_chosen = sv_3d[sample_idx, :, chosen_actions]  # (N, n_features)
+    return shap_chosen
+
+
+def _save_result(shap_chosen: np.ndarray, tag: str, output_dir: str) -> None:
+    """Save Φ_s matrix and per-feature summary."""
+    # Raw Φ_s
+    df_out = pd.DataFrame(shap_chosen, columns=FEATURE_COLS)
+    raw_path = os.path.join(output_dir, f"shap_{tag}.csv")
+    df_out.to_csv(raw_path, index=False)
+    print(f"  Saved Φ_s → {raw_path}")
+
+    # Summary
+    summary = pd.DataFrame({
+        "feature":       FEATURE_COLS,
+        "mean_abs_shap": np.abs(shap_chosen).mean(axis=0),
+        "mean_shap":     shap_chosen.mean(axis=0),
+    }).sort_values("mean_abs_shap", ascending=False)
+    summary_path = os.path.join(output_dir, f"shap_{tag}_summary.csv")
+    summary.to_csv(summary_path, index=False)
+    print(f"  Summary   → {summary_path}")
+
+
+# ---------------------------------------------------------------------------
+# Per-algorithm runners
+# ---------------------------------------------------------------------------
 
 def run_dqn_shap(df: pd.DataFrame, output_dir: str = "."):
     """
-    Y = Q value of each action, signed (positive/negative Q is meaningful).
-    One sample per (step, action), Y = q_a{i}_scalar.
+    DQN — all-action scalar Q vector → chosen-action SHAP slice.
+
+    action_matrix shape: (N, 12)  — q_a0_scalar … q_a11_scalar (signed)
+    chosen_actions: env_action    — the action actually executed in the environment
     """
-    print("[DQN SHAP] Building dataset...")
+    print("[DQN SHAP] Computing (all-action Q → chosen-action SHAP)...")
     missing = [c for c in ACTION_COLS_SCALAR if c not in df.columns]
     if missing:
         raise ValueError(f"DQN scalar Q columns missing: {missing}")
 
-    feats = get_features(df)
-    rows_X, rows_Y = [], []
+    X              = _get_features(df)
+    action_matrix  = df[ACTION_COLS_SCALAR].values.astype(np.float64)  # (N, 12)
+    chosen_actions = df["env_action"].values.astype(int)                # actual action taken
 
-    for idx, row in df.iterrows():
-        x = feats.loc[idx].values
-        for i, col in enumerate(ACTION_COLS_SCALAR):
-            rows_X.append(x)
-            rows_Y.append(row[col])
-
-    X = pd.DataFrame(rows_X, columns=FEATURE_COLS)
-    Y = pd.Series(rows_Y, name="scalar_Q")
-
-    sv = _fit_regressor_shap(X, Y)
-    _save_shap_result(sv, X, Y, "dqn_scalar_Q", output_dir)
-    return sv, X
+    shap_chosen = _compute_shap_chosen(X, action_matrix, chosen_actions)
+    _save_result(shap_chosen, "dqn_scalar_Q", output_dir)
+    return shap_chosen, X
 
 
-# --- Envelope: per-objective Q (signed, 3 separate SHAP runs) --------------
-
-def run_envelope_shap(df: pd.DataFrame, output_dir: str = "."):
+def run_envelope_shap(df: pd.DataFrame, output_dir: str = ".") -> dict:
     """
-    Three separate SHAP regressions, one per objective.
-    Y = q_a{i}_{objective} signed Q value (positive/negative is meaningful).
+    Envelope — one SHAP run per objective (resource / network / security).
+
+    For each objective k:
+        action_matrix: (N, 12) — q_a0_<obj> … q_a11_<obj> (signed)
+        chosen_actions: env_action — the action actually executed in the environment
     """
-    print("[Envelope SHAP] Building dataset (3 objectives)...")
+    print("[Envelope SHAP] Computing (per-objective Q → chosen-action SHAP)...")
+
+    # Chosen action = argmax of scalarized Q = Σ w_k * Q_k(s,a)
+    # scalar_q_a{i} is already the weighted sum stored in CSV
+    scalar_cols    = [f"scalar_q_a{i}" for i in range(N_ACTIONS)]
+    missing_scalar = [c for c in scalar_cols if c not in df.columns]
+    if missing_scalar:
+        raise ValueError(f"Envelope scalar Q columns missing: {missing_scalar}")
+    chosen_actions = df[scalar_cols].values.astype(np.float64).argmax(axis=1)
+
     results = {}
-    feats = get_features(df)
-
     for obj in ENVELOPE_OBJECTIVES:
         obj_cols = [f"q_a{i}_{obj}" for i in range(N_ACTIONS)]
-        missing = [c for c in obj_cols if c not in df.columns]
+        missing  = [c for c in obj_cols if c not in df.columns]
         if missing:
             raise ValueError(f"Envelope columns missing for '{obj}': {missing}")
 
-        rows_X, rows_Y = [], []
-        for idx, row in df.iterrows():
-            x = feats.loc[idx].values
-            for col in obj_cols:
-                rows_X.append(x)
-                rows_Y.append(row[col])
+        X             = _get_features(df)
+        action_matrix = df[obj_cols].values.astype(np.float64)  # (N, 12)
 
-        X = pd.DataFrame(rows_X, columns=FEATURE_COLS)
-        Y = pd.Series(rows_Y, name=f"Q_{obj}")
-
-        sv = _fit_regressor_shap(X, Y)
-        _save_shap_result(sv, X, Y, f"envelope_Q_{obj}", output_dir)
-        results[obj] = (sv, X)
+        shap_chosen = _compute_shap_chosen(X, action_matrix, chosen_actions)
+        _save_result(shap_chosen, f"envelope_Q_{obj}", output_dir)
+        results[obj] = shap_chosen
         print(f"[Envelope SHAP] Objective '{obj}' done.")
 
     return results
 
 
-# --- Envelope: objective influence aggregation ------------------------------
-
 def run_envelope_objective_influence(
     envelope_shap_results: dict,
     rewards_coeff: list,
     output_dir: str = ".",
-):
+) -> pd.DataFrame:
     """
-    After running per-objective SHAP for Envelope, compute how much each
-    objective (resource / network / security) influences the final action
-    selection overall.
+    Aggregate per-objective Φ_s into a weighted influence-share table.
 
-    Method
-    ------
-    For each objective obj_k with weight w_k:
-        total_shap_per_sample = |sv_k.sum(axis=1)|   # scalar per step×action
-        weighted_influence_k  = w_k * total_shap_per_sample
+    For each objective k with reward weight w_k:
+        weighted_influence_k = w_k * mean( |Φ_s^k|.sum(axis=1) )
 
-    Then average across all samples and normalise to get percentage shares.
-
-    Args
-    ----
-    envelope_shap_results : dict returned by run_envelope_shap()
-                            keys = "resource" / "network" / "security"
-                            values = (sv: np.ndarray, X: pd.DataFrame)
-    rewards_coeff         : list of 3 weights [w_resource, w_network, w_security]
-    output_dir            : where to write the CSV
+    Answers: "Does resource, network, or security drive Envelope most?"
     """
-    assert len(rewards_coeff) == len(ENVELOPE_OBJECTIVES), (
-        "rewards_coeff must have one entry per objective"
-    )
+    assert len(rewards_coeff) == len(ENVELOPE_OBJECTIVES)
 
-    weighted_influences = {}
-    for obj, w in zip(ENVELOPE_OBJECTIVES, rewards_coeff):
-        sv, _ = envelope_shap_results[obj]
-        # Sum all feature SHAP values per sample → total contribution of this
-        # objective's Q-signal, then weight by the objective's coefficient
-        total_per_sample = np.abs(sv.sum(axis=1))   # shape (n_samples,)
-        weighted_influences[obj] = w * total_per_sample
-
-    # Stack into (n_samples, 3) and compute mean per objective
-    stacked = np.stack(
-        [weighted_influences[obj] for obj in ENVELOPE_OBJECTIVES], axis=1
-    )  # (n_samples, 3)
-
-    mean_influence = stacked.mean(axis=0)            # (3,)
-    total          = mean_influence.sum()
-    pct_influence  = mean_influence / total * 100    # percentage share
-
+    weighted = {
+        obj: w * np.abs(envelope_shap_results[obj].sum(axis=1)).mean()
+        for obj, w in zip(ENVELOPE_OBJECTIVES, rewards_coeff)
+    }
+    total  = sum(weighted.values())
     result = pd.DataFrame({
         "objective":          ENVELOPE_OBJECTIVES,
         "weight":             rewards_coeff,
-        "mean_weighted_shap": mean_influence,
-        "influence_pct":      pct_influence,
+        "mean_weighted_shap": [weighted[o] for o in ENVELOPE_OBJECTIVES],
+        "influence_pct":      [weighted[o] / total * 100 for o in ENVELOPE_OBJECTIVES],
     }).sort_values("influence_pct", ascending=False)
 
     out_path = os.path.join(output_dir, "shap_envelope_objective_influence.csv")
     result.to_csv(out_path, index=False)
-    print(f"[Envelope] Objective influence saved → {out_path}")
+    print(f"[Envelope] Objective influence → {out_path}")
     print(result.to_string(index=False))
     return result
 
 
-# --- EUPG: policy probability π(a_i, a_j) -----------------------------------
-
-def run_eupg_shap(df: pd.DataFrame, output_dir: str = "."):
-    """
-    Y = prob_action_i (softmax probability) for each action.
-    One sample per (step, action).
-    """
-    print("[EUPG SHAP] Building dataset...")
-    missing = [c for c in ACTION_COLS_PROB if c not in df.columns]
-    if missing:
-        raise ValueError(f"EUPG prob columns missing: {missing}")
-
-    feats = get_features(df)
-    rows_X, rows_Y = [], []
-
-    for idx, row in df.iterrows():
-        x = feats.loc[idx].values
-        for col in ACTION_COLS_PROB:
-            rows_X.append(x)
-            rows_Y.append(row[col])
-
-    X = pd.DataFrame(rows_X, columns=FEATURE_COLS)
-    Y = pd.Series(rows_Y, name="policy_prob")
-
-    sv = _fit_regressor_shap(X, Y)
-    _save_shap_result(sv, X, Y, "eupg_policy_prob", output_dir)
-    return sv, X
-
-
-# --- PPO / A2C: policy probability ------------------------------------------
-
 def run_policy_prob_shap(df: pd.DataFrame, algo: str, output_dir: str = "."):
     """
-    Y = prob_action_i (softmax probability) for each action.
-    CSV stores prob_action_i directly — no log or logit transformation needed.
-    One sample per (step, action).
+    PPO / A2C / EUPG — all-action softmax prob vector → chosen-action SHAP.
+
+    action_matrix shape: (N, 12)  — prob_action_0 … prob_action_11
+    chosen_actions: env_action    — the action actually executed in the environment
     """
-    assert algo in ("PPO", "A2C"), f"Expected PPO or A2C, got {algo}"
-    print(f"[{algo} SHAP] Building dataset (policy probability)...")
+    assert algo in ("PPO", "A2C", "EUPG"), f"Unexpected algo: {algo}"
+    print(f"[{algo} SHAP] Computing (all-action prob → chosen-action SHAP)...")
     missing = [c for c in ACTION_COLS_PROB if c not in df.columns]
     if missing:
         raise ValueError(f"{algo} prob columns missing: {missing}")
 
-    feats = get_features(df)
-    rows_X, rows_Y = [], []
+    X              = _get_features(df)
+    action_matrix  = df[ACTION_COLS_PROB].values.astype(np.float64)  # (N, 12)
+    chosen_actions = df["env_action"].values.astype(int)              # actual action taken
 
-    for idx, row in df.iterrows():
-        x = feats.loc[idx].values
-        for col in ACTION_COLS_PROB:
-            rows_X.append(x)
-            rows_Y.append(row[col])
-
-    X = pd.DataFrame(rows_X, columns=FEATURE_COLS)
-    Y = pd.Series(rows_Y, name="policy_prob")
-
-    sv = _fit_regressor_shap(X, Y)
-    _save_shap_result(sv, X, Y, f"{algo.lower()}_policy_prob", output_dir)
-    return sv, X
+    shap_chosen = _compute_shap_chosen(X, action_matrix, chosen_actions)
+    _save_result(shap_chosen, f"{algo.lower()}_policy_prob", output_dir)
+    return shap_chosen, X
 
 
 # ---------------------------------------------------------------------------
-# Shared fitting / saving utilities
+# Envelope full pipeline
 # ---------------------------------------------------------------------------
-
-def _fit_regressor_shap(X: pd.DataFrame, Y: pd.Series) -> np.ndarray:
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X)
-    model = GradientBoostingRegressor(n_estimators=200, max_depth=4, random_state=42)
-    model.fit(X_scaled, Y)
-    explainer = shap.TreeExplainer(model)
-    shap_values = explainer.shap_values(X_scaled)
-    return shap_values
-
-
-def _save_shap_result(sv: np.ndarray, X: pd.DataFrame, Y: pd.Series,
-                      name: str, output_dir: str):
-    result = pd.DataFrame(sv, columns=FEATURE_COLS)
-    result[Y.name] = Y.values
-    out_path = os.path.join(output_dir, f"shap_{name}.csv")
-    result.to_csv(out_path, index=False)
-    print(f"  Saved → {out_path}")
-    _save_summary(sv, FEATURE_COLS, name,
-                  os.path.join(output_dir, f"shap_{name}_summary.csv"))
-
-
-def _save_summary(sv: np.ndarray, feature_names: list, name: str, out_path: str):
-    """
-    mean_abs_shap: global importance (magnitude, used for ranking).
-    mean_shap:     signed directional bias across all samples.
-    """
-    summary = pd.DataFrame({
-        "feature": feature_names,
-        "mean_abs_shap": np.abs(sv).mean(axis=0),
-        "mean_shap":     sv.mean(axis=0),
-    }).sort_values("mean_abs_shap", ascending=False)
-    summary.to_csv(out_path, index=False)
-    print(f"  Summary → {out_path}")
-
-
-# ---------------------------------------------------------------------------
-# Envelope full pipeline (SHAP + objective influence)
-# ---------------------------------------------------------------------------
-
-REWARDS_COEFF = [0.4, 0.3, 0.3]   # [resource, network, security]
 
 def _run_envelope_full(df: pd.DataFrame, output_dir: str = "."):
-    """Run per-objective SHAP then compute objective influence aggregation."""
     results = run_envelope_shap(df, output_dir)
     run_envelope_objective_influence(results, REWARDS_COEFF, output_dir)
     return results
 
 
 # ---------------------------------------------------------------------------
-# Dispatcher: route each algorithm to the right SHAP function
+# Dispatcher
 # ---------------------------------------------------------------------------
 
 ALGO_DISPATCHER = {
     "DQN":      lambda df, out: run_dqn_shap(df, out),
     "Envelope": lambda df, out: _run_envelope_full(df, out),
-    "EUPG":     lambda df, out: run_eupg_shap(df, out),
+    "EUPG":     lambda df, out: run_policy_prob_shap(df, "EUPG", out),
     "PPO":      lambda df, out: run_policy_prob_shap(df, "PPO", out),
     "A2C":      lambda df, out: run_policy_prob_shap(df, "A2C", out),
 }
 
 
 def run_all(df: pd.DataFrame, output_dir: str = "shap_outputs"):
-
     os.makedirs(output_dir, exist_ok=True)
-
-    algos_present = df["algo"].unique()
-    for algo in algos_present:
+    for algo in df["algo"].unique():
         if algo not in ALGO_DISPATCHER:
-            print(f"[WARNING] Unknown algo '{algo}', skipping customized SHAP.")
+            print(f"[WARNING] Unknown algo '{algo}', skipping.")
             continue
-        print(f"\n{'='*60}")
-        print(f"Customized SHAP: {algo}")
-        print('='*60)
+        print(f"\n{'='*60}\nCustomized SHAP: {algo}\n{'='*60}")
         algo_df = df[df["algo"] == algo].reset_index(drop=True)
         ALGO_DISPATCHER[algo](algo_df, output_dir)
-
     print(f"\n✓ All SHAP analyses complete. Outputs in: {output_dir}/")
 
 
@@ -344,19 +363,20 @@ def run_all(df: pd.DataFrame, output_dir: str = "shap_outputs"):
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Run SHAP analysis for RL algorithms.")
-    parser.add_argument("--input",  required=True, help="Path to input CSV file")
+    parser = argparse.ArgumentParser(description="SHAP analysis for RL algorithms.")
+    parser.add_argument("--input",  required=True, help="Path to input CSV")
     parser.add_argument("--output", default="shap_outputs", help="Output directory")
-    parser.add_argument("--algo",   default=None,
-                        help="Run only this algorithm's customized SHAP (optional). "
-                             "Choices: DQN, Envelope, EUPG, PPO, A2C")
+    parser.add_argument(
+        "--algo", default=None,
+        help="Run only one algorithm (DQN | Envelope | EUPG | PPO | A2C). "
+             "Omit to run all algorithms found in the CSV.",
+    )
     args = parser.parse_args()
 
     data = load_data(args.input)
     print(f"Loaded {len(data)} rows, algorithms: {data['algo'].unique().tolist()}")
 
     if args.algo:
-        # Single algorithm mode
         os.makedirs(args.output, exist_ok=True)
         algo_df = data[data["algo"] == args.algo].reset_index(drop=True)
         if algo_df.empty:
