@@ -1,18 +1,11 @@
 Feature mapping: {0: 'feat_mean_mtd_overhead', 1: 'feat_mean_network_penalty', 2: 'feat_max_network_penalty', 3: 'feat_mean_security_penalty', 4: 'feat_max_security_penalty'}
 
 === Decision Tree ===
-|--- feat_max_security_penalty <= 5.00
-|   |--- class: 8
-|--- feat_max_security_penalty >  5.00
-|   |--- feat_max_security_penalty <= 5.01
-|   |   |--- class: 1
-|   |--- feat_max_security_penalty >  5.01
-|   |   |--- class: 8
+|--- class: 0
 
 
 === Linear Regression ===
-f(x) = 1.4754e+00 - 5.4750e-01·x1 - 3.6703e-02·x2 + 2.2973e-02·x3 + 5.0372e+00·x4 - 1.6482e+00·x5
+f(x) = 8.0000e+00 
 
 === Logistic Regression ===
-f_1(x) = -2.7641e+00 + 1.0970e-04*x1 - 3.9035e-02*x2 - 2.1429e-01*x3 + 2.5085e-02*x4 + 1.6224e-01*x5
-f_8(x) = 2.7641e+00 - 1.0970e-04*x1 + 3.9035e-02*x2 + 2.1429e-01*x3 - 2.5085e-02*x4 - 1.6224e-01*x5
+Skipped: all 66 boundary points map to a single action (8); logistic regression requires at least 2 classes.

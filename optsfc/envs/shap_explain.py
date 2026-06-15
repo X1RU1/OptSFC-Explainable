@@ -45,15 +45,38 @@ SHAP target per algorithm
     DQN       → all-action scalar Q vector,         shape (N, 12)
     PPO/A2C/
     EUPG      → all-action softmax prob vector,      shape (N, 12)
-    Envelope  → all-action per-objective Q vector,   shape (N, 12)
-                one independent SHAP run per objective (resource/network/security)
+    Envelope  → TWO independent SHAP passes:
+
+                (1) Scalarized Q vector (scalar_q_a0 … scalar_q_a11),
+                    shape (N, 12), chosen_actions = argmax(scalar_q_a{i}).
+                    This mirrors run_dqn_shap exactly (same target type:
+                    an all-action scalar value vector, greedy argmax).
+                    → shap_envelope_scalar_Q.csv
+                    This is the Φ_s consumed by SILVER for Envelope.
+
+                (2) Per-objective Q vectors (resource/network/security),
+                    one independent SHAP run each, all sliced at the SAME
+                    chosen_actions = argmax(scalar_q_a{i}) as in (1).
+                    → shap_envelope_Q_{resource,network,security}.csv
+                    Diagnostic only — feeds shap_envelope_objective_influence.csv,
+                    NOT used by SILVER.
 
 Output files
 ------------
     shap_<tag>.csv         — Φ_s: per-state chosen-action SHAP, shape (N, n_features)
     shap_<tag>_summary.csv — mean |SHAP| and mean signed SHAP per feature
-    shap_envelope_objective_influence.csv  (Envelope only)
-                           — weighted influence share per objective (%)
+
+    Envelope only:
+    shap_envelope_scalar_Q.csv (+ _summary.csv)
+                           — Φ_s for the scalarized Q the policy actually
+                             maximizes. THIS is the file SILVER consumes
+                             (mirrors shap_dqn_scalar_Q.csv for DQN).
+    shap_envelope_Q_{resource,network,security}.csv (+ _summary.csv each)
+                           — per-objective Φ_s, diagnostic only
+                             (NOT consumed by SILVER)
+    shap_envelope_objective_influence.csv
+                           — weighted influence share per objective (%),
+                             derived from the per-objective Φ_s above
 """
 
 import os
@@ -78,9 +101,10 @@ FEATURE_COLS = [
 ]
 
 N_ACTIONS = 12
-ACTION_COLS_PROB   = [f"prob_action_{i}" for i in range(N_ACTIONS)]
-ACTION_COLS_SCALAR = [f"q_a{i}_scalar"   for i in range(N_ACTIONS)]
-ENVELOPE_OBJECTIVES = ["resource", "network", "security"]
+ACTION_COLS_PROB     = [f"prob_action_{i}" for i in range(N_ACTIONS)]
+ACTION_COLS_SCALAR   = [f"q_a{i}_scalar"    for i in range(N_ACTIONS)]
+ENVELOPE_SCALAR_COLS = [f"scalar_q_a{i}"    for i in range(N_ACTIONS)]
+ENVELOPE_OBJECTIVES  = ["resource", "network", "security"]
 
 # Envelope reward weights [resource, network, security]
 REWARDS_COEFF = [0.4, 0.3, 0.3]
@@ -213,7 +237,7 @@ def run_dqn_shap(df: pd.DataFrame, output_dir: str = "."):
     DQN — all-action scalar Q vector → chosen-action SHAP slice.
 
     action_matrix shape: (N, 12)  — q_a0_scalar … q_a11_scalar (signed)
-    chosen_actions: env_action    — the action actually executed in the environment
+    chosen_actions: argmax Q      — greedy action, explaining policy not execution trace
     """
     print("[DQN SHAP] Computing (all-action Q → chosen-action SHAP)...")
     missing = [c for c in ACTION_COLS_SCALAR if c not in df.columns]
@@ -222,10 +246,38 @@ def run_dqn_shap(df: pd.DataFrame, output_dir: str = "."):
 
     X              = _get_features(df)
     action_matrix  = df[ACTION_COLS_SCALAR].values.astype(np.float64)  # (N, 12)
-    chosen_actions = df["env_action"].values.astype(int)                # actual action taken
+    chosen_actions = action_matrix.argmax(axis=1)                       # greedy policy: argmax Q
 
     shap_chosen = _compute_shap_chosen(X, action_matrix, chosen_actions)
     _save_result(shap_chosen, "dqn_scalar_Q", output_dir)
+    return shap_chosen, X
+
+
+def run_envelope_scalar_shap(df: pd.DataFrame, output_dir: str = "."):
+    """
+    Envelope — all-action scalarized Q vector → chosen-action SHAP slice.
+
+    Structurally identical to run_dqn_shap: scalar_q_a{i} is an all-action
+    scalar value vector (the weighted sum w·Q_vec already stored in the CSV),
+    so it is treated exactly like DQN's q_ai_scalar.
+
+    action_matrix shape: (N, 12)  — scalar_q_a0 … scalar_q_a11 (signed)
+    chosen_actions: argmax(scalar_q_a{i}) — greedy action, the action the
+                    Envelope policy actually selects.
+
+    This is the Φ_s consumed by SILVER for Envelope (shap_envelope_scalar_Q.csv).
+    """
+    print("[Envelope SHAP] Computing (scalarized Q → chosen-action SHAP, for SILVER)...")
+    missing = [c for c in ENVELOPE_SCALAR_COLS if c not in df.columns]
+    if missing:
+        raise ValueError(f"Envelope scalar Q columns missing: {missing}")
+
+    X              = _get_features(df)
+    action_matrix  = df[ENVELOPE_SCALAR_COLS].values.astype(np.float64)  # (N, 12)
+    chosen_actions = action_matrix.argmax(axis=1)                         # greedy policy: argmax scalar Q
+
+    shap_chosen = _compute_shap_chosen(X, action_matrix, chosen_actions)
+    _save_result(shap_chosen, "envelope_scalar_Q", output_dir)
     return shap_chosen, X
 
 
@@ -235,17 +287,25 @@ def run_envelope_shap(df: pd.DataFrame, output_dir: str = ".") -> dict:
 
     For each objective k:
         action_matrix: (N, 12) — q_a0_<obj> … q_a11_<obj> (signed)
-        chosen_actions: env_action — the action actually executed in the environment
+
+    chosen_actions is shared across all three objectives and equals
+    argmax(scalar_q_a{i}) — the same action selected in
+    run_envelope_scalar_shap — so all per-objective Φ_s here explain the
+    SAME chosen action, just w.r.t. different Q functions.
+
+    These three Φ_s matrices are diagnostic — they answer "what drives each
+    objective's Q-value at the chosen action" and feed
+    shap_envelope_objective_influence.csv. They are NOT the Φ_s consumed by
+    SILVER (see run_envelope_scalar_shap for that).
     """
     print("[Envelope SHAP] Computing (per-objective Q → chosen-action SHAP)...")
 
-    # Chosen action = argmax of scalarized Q = Σ w_k * Q_k(s,a)
+    # Chosen action = argmax of scalarized Q = w·Q_vec
     # scalar_q_a{i} is already the weighted sum stored in CSV
-    scalar_cols    = [f"scalar_q_a{i}" for i in range(N_ACTIONS)]
-    missing_scalar = [c for c in scalar_cols if c not in df.columns]
+    missing_scalar = [c for c in ENVELOPE_SCALAR_COLS if c not in df.columns]
     if missing_scalar:
         raise ValueError(f"Envelope scalar Q columns missing: {missing_scalar}")
-    chosen_actions = df[scalar_cols].values.astype(np.float64).argmax(axis=1)
+    chosen_actions = df[ENVELOPE_SCALAR_COLS].values.astype(np.float64).argmax(axis=1)  # greedy policy
 
     results = {}
     for obj in ENVELOPE_OBJECTIVES:
@@ -277,6 +337,10 @@ def run_envelope_objective_influence(
         weighted_influence_k = w_k * mean( |Φ_s^k|.sum(axis=1) )
 
     Answers: "Does resource, network, or security drive Envelope most?"
+
+    This is a diagnostic summary for the thesis discussion and is
+    independent of the scalarized Φ_s consumed by SILVER
+    (shap_envelope_scalar_Q.csv).
     """
     assert len(rewards_coeff) == len(ENVELOPE_OBJECTIVES)
 
@@ -304,7 +368,7 @@ def run_policy_prob_shap(df: pd.DataFrame, algo: str, output_dir: str = "."):
     PPO / A2C / EUPG — all-action softmax prob vector → chosen-action SHAP.
 
     action_matrix shape: (N, 12)  — prob_action_0 … prob_action_11
-    chosen_actions: env_action    — the action actually executed in the environment
+    chosen_actions: argmax prob   — greedy action, explaining policy not execution trace
     """
     assert algo in ("PPO", "A2C", "EUPG"), f"Unexpected algo: {algo}"
     print(f"[{algo} SHAP] Computing (all-action prob → chosen-action SHAP)...")
@@ -314,7 +378,7 @@ def run_policy_prob_shap(df: pd.DataFrame, algo: str, output_dir: str = "."):
 
     X              = _get_features(df)
     action_matrix  = df[ACTION_COLS_PROB].values.astype(np.float64)  # (N, 12)
-    chosen_actions = df["env_action"].values.astype(int)              # actual action taken
+    chosen_actions = action_matrix.argmax(axis=1)                     # greedy policy: argmax prob
 
     shap_chosen = _compute_shap_chosen(X, action_matrix, chosen_actions)
     _save_result(shap_chosen, f"{algo.lower()}_policy_prob", output_dir)
@@ -326,8 +390,13 @@ def run_policy_prob_shap(df: pd.DataFrame, algo: str, output_dir: str = "."):
 # ---------------------------------------------------------------------------
 
 def _run_envelope_full(df: pd.DataFrame, output_dir: str = "."):
+    # Pass 1: scalarized Q → Φ_s for SILVER (mirrors run_dqn_shap)
+    run_envelope_scalar_shap(df, output_dir)
+
+    # Pass 2 (x3): per-objective Q → diagnostic Φ_s, feeds influence table
     results = run_envelope_shap(df, output_dir)
     run_envelope_objective_influence(results, REWARDS_COEFF, output_dir)
+
     return results
 
 

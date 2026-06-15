@@ -24,7 +24,13 @@ Key design decisions vs paper
 - Paper uses a DNN to approximate the RL policy and query boundary labels.
   Here we skip the DNN and query action labels directly from the precomputed
   Q / probability columns in the original CSV  (exact policy, no approximation).
-- Envelope: action label = argmax(scalar_q), consistent with shap_explain.py.
+- Envelope: Φ_s comes from shap_envelope_scalar_Q.csv, computed by
+  shap_explain.py on the scalarized Q vector (scalar_q_a{i} = w·Q_vec),
+  with chosen action = argmax(scalar_q_a{i}) — structurally identical to
+  DQN's q_ai_scalar. The action label here uses the SAME argmax
+  (argmax(scalar_q_a{i})), so Φ_s and the action label always refer to the
+  same chosen action. Envelope is therefore loaded through the same generic
+  path as DQN/PPO/A2C/EUPG (see _load_shap), with no per-algo special case.
 - All surrogate models are fit on original state features X (not Φ_s),
   matching the paper's shap_inverse_boundary_data path.
 
@@ -32,6 +38,9 @@ Input files (from shap_explain.py output dir)
 ----------------------------------------------
     shap_<tag>.csv          — Φ_s matrix, shape (N, n_features)
                               columns = FEATURE_COLS (5 objective features)
+    For Envelope, <tag> = "envelope_scalar_Q" (i.e. shap_envelope_scalar_Q.csv).
+    The diagnostic per-objective files (shap_envelope_Q_{resource,network,
+    security}.csv) are NOT used here.
 
 Input files (original data CSV, same as fed to shap_explain.py)
 -----------------------------------------------------------------
@@ -85,16 +94,18 @@ N_ACTIONS          = 12
 ACTION_COLS_PROB   = [f"prob_action_{i}" for i in range(N_ACTIONS)]
 ACTION_COLS_SCALAR = [f"q_a{i}_scalar"   for i in range(N_ACTIONS)]
 ENVELOPE_SCALAR    = [f"scalar_q_a{i}"   for i in range(N_ACTIONS)]
-ENVELOPE_OBJECTIVES = ["resource", "network", "security"]
 
-# SHAP output filename per algo tag
+# SHAP output filename per algo tag — all algos now follow the same
+# "one file = Φ_s for the policy's actually-selected action" convention.
+# Envelope's scalar_q_a{i} is structurally identical to DQN's q_ai_scalar
+# (both are all-action scalar value vectors with argmax = chosen action),
+# so it is loaded through the exact same path (see _load_shap).
 SHAP_FILE = {
     "DQN":      "shap_dqn_scalar_Q.csv",
     "PPO":      "shap_ppo_policy_prob.csv",
     "A2C":      "shap_a2c_policy_prob.csv",
     "EUPG":     "shap_eupg_policy_prob.csv",
-    # Envelope: averaged across 3 objectives (see _load_envelope_shap)
-    "Envelope": None,
+    "Envelope": "shap_envelope_scalar_Q.csv",
 }
 
 # ---------------------------------------------------------------------------
@@ -109,19 +120,17 @@ def _load_state_features(df: pd.DataFrame) -> np.ndarray:
 
 
 def _load_shap(algo: str, shap_dir: str) -> np.ndarray:
-    """Load Φ_s matrix for algo. Files are under shap_dir/<algo_lower>/."""
-    algo_dir = os.path.join(shap_dir, algo.lower())
-    if algo == "Envelope":
-        frames = []
-        for obj in ENVELOPE_OBJECTIVES:
-            p = os.path.join(algo_dir, f"shap_envelope_Q_{obj}.csv")
-            if not os.path.exists(p):
-                raise FileNotFoundError(f"Missing Envelope SHAP file: {p}")
-            frames.append(pd.read_csv(p)[FEATURE_COLS].values)
-        return np.mean(frames, axis=0)   # (N, 5) averaged across objectives
+    """
+    Load Φ_s matrix for algo. Files are under shap_dir/<algo_lower>/.
 
-    fname = SHAP_FILE[algo]
-    p = os.path.join(algo_dir, fname)
+    Generic for all five algorithms (DQN, Envelope, PPO, A2C, EUPG):
+    each reads a single SHAP_FILE[algo] whose Φ_s corresponds to the
+    policy's actually-selected action (argmax Q / argmax prob), matching
+    the action labels produced by _get_action_labels.
+    """
+    algo_dir = os.path.join(shap_dir, algo.lower())
+    fname    = SHAP_FILE[algo]
+    p        = os.path.join(algo_dir, fname)
     if not os.path.exists(p):
         raise FileNotFoundError(f"Missing SHAP file: {p}")
     return pd.read_csv(p)[FEATURE_COLS].values.astype(np.float64)
@@ -132,7 +141,10 @@ def _get_action_labels(algo: str, df: pd.DataFrame) -> np.ndarray:
     Query action label for every state directly from precomputed Q/prob columns.
     Mirrors the paper's DNN query but uses exact policy outputs.
         DQN      → argmax scalar Q
-        Envelope → argmax scalarized Q (= w·Q_vec, already computed)
+        Envelope → argmax scalarized Q (scalar_q_a{i} = w·Q_vec), the same
+                   argmax used to compute shap_envelope_scalar_Q.csv in
+                   shap_explain.py — so Φ_s and the action label here always
+                   refer to the same chosen action.
         PPO/A2C/EUPG → argmax softmax prob
     """
     if algo == "DQN":
@@ -416,9 +428,18 @@ def run_silver(
     lr = _fit_linear_regression(bd_state, bd_y)
     _save_pkl(lr, os.path.join(output_dir, f"silver_{tag}_linear_regression.pkl"))
 
-    # Logistic Regression
-    log_r = _fit_logistic_regression(bd_state, bd_y)
-    _save_pkl(log_r, os.path.join(output_dir, f"silver_{tag}_logistic_regression.pkl"))
+    # Logistic Regression — sklearn's multinomial solver requires >= 2 classes.
+    # For some algo/k combinations, every boundary point can collapse onto a
+    # single action (the Φ_s-space cluster boundaries don't separate distinct
+    # actions for this algo). In that case skip fitting and record why, rather
+    # than crashing the whole run.
+    if len(class_names) < 2:
+        log_r = None
+        print(f"  [WARNING] Only one action class ({class_names[0]}) among "
+              f"boundary points — skipping Logistic Regression for {algo}.")
+    else:
+        log_r = _fit_logistic_regression(bd_state, bd_y)
+        _save_pkl(log_r, os.path.join(output_dir, f"silver_{tag}_logistic_regression.pkl"))
 
     # ── Step 7: formula strings ───────────────────────────────────────────
     coeff_names = [f"x{i+1}" for i in range(len(feature_names))]
@@ -429,7 +450,14 @@ def run_silver(
     formulas.append("\n=== Linear Regression ===")
     formulas.append(_linear_formula(lr, coeff_names, fname="f"))
     formulas.append("\n=== Logistic Regression ===")
-    formulas.append(_logistic_formulas(log_r, coeff_names, class_names, fname="f"))
+    if log_r is None:
+        formulas.append(
+            f"Skipped: all {len(bd_y)} boundary points map to a single "
+            f"action ({class_names[0]}); logistic regression requires "
+            f"at least 2 classes."
+        )
+    else:
+        formulas.append(_logistic_formulas(log_r, coeff_names, class_names, fname="f"))
 
     formula_path = os.path.join(output_dir, f"silver_{tag}_formulas.txt")
     with open(formula_path, "w", encoding="utf-8") as fh:
