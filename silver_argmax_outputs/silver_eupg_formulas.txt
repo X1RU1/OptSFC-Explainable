@@ -1,0 +1,11 @@
+Feature mapping: {0: 'feat_mean_mtd_overhead', 1: 'feat_mean_network_penalty', 2: 'feat_max_network_penalty', 3: 'feat_mean_security_penalty', 4: 'feat_max_security_penalty'}
+
+=== Decision Tree ===
+|--- class: 0
+
+
+=== Linear Regression ===
+f(x) = 8.0000e+00 
+
+=== Logistic Regression ===
+Skipped: all 66 boundary points map to a single action (8); logistic regression requires at least 2 classes.

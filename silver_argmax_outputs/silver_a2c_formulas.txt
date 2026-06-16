@@ -1,0 +1,42 @@
+Feature mapping: {0: 'feat_mean_mtd_overhead', 1: 'feat_mean_network_penalty', 2: 'feat_max_network_penalty', 3: 'feat_mean_security_penalty', 4: 'feat_max_security_penalty'}
+
+=== Decision Tree ===
+|--- feat_max_security_penalty <= 4.65
+|   |--- feat_mean_security_penalty <= 2.80
+|   |   |--- feat_mean_network_penalty <= 0.01
+|   |   |   |--- class: 2
+|   |   |--- feat_mean_network_penalty >  0.01
+|   |   |   |--- feat_mean_network_penalty <= 0.73
+|   |   |   |   |--- feat_mean_security_penalty <= 2.80
+|   |   |   |   |   |--- class: 5
+|   |   |   |   |--- feat_mean_security_penalty >  2.80
+|   |   |   |   |   |--- feat_mean_network_penalty <= 0.01
+|   |   |   |   |   |   |--- feat_mean_network_penalty <= 0.01
+|   |   |   |   |   |   |   |--- class: 7
+|   |   |   |   |   |   |--- feat_mean_network_penalty >  0.01
+|   |   |   |   |   |   |   |--- feat_max_security_penalty <= 4.58
+|   |   |   |   |   |   |   |   |--- class: 7
+|   |   |   |   |   |   |   |--- feat_max_security_penalty >  4.58
+|   |   |   |   |   |   |   |   |--- feat_max_network_penalty <= 0.02
+|   |   |   |   |   |   |   |   |   |--- class: 4
+|   |   |   |   |   |   |   |   |--- feat_max_network_penalty >  0.02
+|   |   |   |   |   |   |   |   |   |--- class: 5
+|   |   |   |   |   |--- feat_mean_network_penalty >  0.01
+|   |   |   |   |   |   |--- class: 7
+|   |   |   |--- feat_mean_network_penalty >  0.73
+|   |   |   |   |--- class: 5
+|   |--- feat_mean_security_penalty >  2.80
+|   |   |--- class: 2
+|--- feat_max_security_penalty >  4.65
+|   |--- class: 1
+
+
+=== Linear Regression ===
+f(x) = 4.0428e+01 + 2.3826e+00·x1 + 1.9995e+02·x2 - 2.8658e+01·x3 - 4.4478e+01·x4 + 1.9147e+01·x5
+
+=== Logistic Regression ===
+f_1(x) = -1.0685e+01 + 1.6862e-02*x1 - 9.5900e-02*x2 - 5.2828e-01*x3 + 1.4357e+00*x4 + 1.6359e+00*x5
+f_2(x) = 5.3971e+00 + 2.6320e-02*x1 - 2.2110e-02*x2 - 1.4016e-02*x3 - 3.5634e-01*x4 - 7.3295e-01*x5
+f_4(x) = -1.3803e+00 + 7.5844e-04*x1 - 2.4414e-02*x2 - 1.7837e-01*x3 - 7.3683e-02*x4 - 7.9387e-02*x5
+f_5(x) = 2.5784e-01 - 6.9199e-02*x1 + 8.4338e-02*x2 + 5.7523e-01*x3 - 1.6632e-01*x4 - 1.5120e-01*x5
+f_7(x) = 6.4106e+00 + 2.5258e-02*x1 + 5.8086e-02*x2 + 1.4543e-01*x3 - 8.3935e-01*x4 - 6.7231e-01*x5
