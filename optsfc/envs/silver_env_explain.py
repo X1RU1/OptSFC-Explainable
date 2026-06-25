@@ -14,11 +14,37 @@ Step 5  RL-Guided Labeling: read action label directly from env_action column
             ALL algos (DQN / Envelope / PPO / A2C / EUPG) → env_action
             This is the action the agent actually executed in the environment,
             which may differ from argmax(Q/prob) for stochastic policies.
-Step 6  Fit interpretable surrogate models on (boundary X, action labels):
+Step 5b Quantile discretization of bd_state (Plan B)
+            Compute per-feature tertile edges from the full trajectory data X
+            (not from boundary points) so the bins reflect the true feature
+            distribution.  Each continuous value is mapped to an integer bin:
+                0  →  low    (below 33rd percentile of X)
+                1  →  medium (33rd–66th percentile of X)
+                2  →  high   (above 66th percentile of X)
+            The same bin_edges dict is applied to bd_state before surrogate
+            model training, and must be reused in the APG stage so that
+            tree.apply() receives identically discretized features.
+Step 6  Fit interpretable surrogate models on (bd_state_discrete, action labels):
             Decision Tree   (primary, fully interpretable)
             Linear Regression   (continuous approximation, round+clip)
             Logistic Regression (probabilistic multi-class)
-Step 7  Save models, boundary datasets, and formula strings
+Step 7  Save models, boundary datasets, bin_edges, and formula strings
+
+Discretization design note
+---------------------------
+bin_edges is computed from the full per-algo trajectory X, not from the
+66 boundary points.  This ensures the low/medium/high thresholds reflect
+realistic feature ranges rather than the narrow boundary subset.
+bin_edges is saved alongside the decision tree so the APG stage can apply
+the identical mapping to raw trajectory features before calling tree.apply().
+
+APG alignment guarantee
+------------------------
+When assigning leaf nodes in the APG stage:
+    X_discrete = discretize(X_traj, bin_edges)
+    leaf_ids   = dt.apply(X_discrete)
+Both the tree and the input share the same discrete feature space, so
+leaf-node membership is semantically consistent with the surrogate's training.
 
 Consistency guarantee
 ----------------------
@@ -47,7 +73,9 @@ Output files (per algo)
 ------------------------
     silver_<tag>_env_kmeans.pkl
     silver_<tag>_env_boundary_shap.csv
-    silver_<tag>_env_boundary_state.csv
+    silver_<tag>_env_boundary_state.csv          (continuous, for reference)
+    silver_<tag>_env_boundary_state_discrete.csv (discretized, used for training)
+    silver_<tag>_env_bin_edges.pkl               (bin_edges dict; reuse in APG)
     silver_<tag>_env_decision_tree.pkl
     silver_<tag>_env_linear_regression.pkl
     silver_<tag>_env_logistic_regression.pkl
@@ -58,6 +86,7 @@ Usage
 -----
     python silver_env_explain.py --input data.csv --shap_dir shap_env_outputs --output silver_env_outputs
     python silver_env_explain.py --input data.csv --shap_dir shap_env_outputs --output silver_env_outputs --algo DQN
+    python silver_env_explain.py --input data.csv --shap_dir shap_env_outputs --output silver_env_outputs --n_bins 3
 """
 
 import os
@@ -88,8 +117,17 @@ FEATURE_COLS = [
     "feat_max_security_penalty",
 ]
 
-N_ACTIONS     = 12
+N_ACTIONS      = 12
 ENV_ACTION_COL = "env_action"
+
+# Default number of quantile bins per feature (3 → low / medium / high).
+# Increasing this (e.g. to 4 or 5) produces finer-grained leaf conditions
+# at the cost of a larger discrete state space.
+DEFAULT_N_BINS = 3
+
+# Human-readable bin labels used in formula output and tree annotations.
+# Length must equal DEFAULT_N_BINS (or the --n_bins argument).
+BIN_LABELS = ["low", "medium", "high"]
 
 # Φ_s files produced by shap_explain_env_action.py.
 # All files are flat under shap_dir/ (no subdirectories).
@@ -212,7 +250,7 @@ def _build_boundary_dataset(
     Returns
     -------
     bd_shap  : (n_pairs, n_features) — boundary in Φ_s space
-    bd_state : (n_pairs, n_features) — boundary in state space
+    bd_state : (n_pairs, n_features) — boundary in state space (continuous)
     bd_y     : (n_pairs,)            — env_action labels
     meta     : list of (ci, cj) tuples
     """
@@ -233,10 +271,117 @@ def _build_boundary_dataset(
 
 
 # ---------------------------------------------------------------------------
+# Step 5b: Quantile discretization (Plan B)
+# ---------------------------------------------------------------------------
+
+def compute_bin_edges(X: np.ndarray, feature_names: list, n_bins: int = DEFAULT_N_BINS) -> dict:
+    """
+    Compute per-feature quantile bin edges from the full trajectory data X.
+
+    Edges are computed from the complete per-algo trajectory (not from the
+    66 boundary points) so the low/medium/high thresholds reflect the true
+    distribution of each feature across all observed states.
+
+    Parameters
+    ----------
+    X            : (N, n_features) continuous feature matrix — full trajectory
+    feature_names: list of feature name strings (length must equal X.shape[1])
+    n_bins       : number of equal-frequency bins (default 3 → low/medium/high)
+
+    Returns
+    -------
+    bin_edges : dict mapping feature_name → 1-D array of (n_bins - 1) cut points
+                Example for n_bins=3:
+                    {"feat_mean_mtd_overhead": [0.23, 0.67], ...}
+                A value v is assigned bin 0 if v <= edges[0],
+                bin 1 if edges[0] < v <= edges[1], ..., bin n_bins-1 otherwise.
+    """
+    bin_edges = {}
+    quantile_steps = [i / n_bins for i in range(1, n_bins)]   # e.g. [0.333, 0.667]
+    for col_idx, name in enumerate(feature_names):
+        col    = X[:, col_idx]
+        edges  = np.quantile(col, quantile_steps)
+        bin_edges[name] = edges
+    return bin_edges
+
+
+def discretize(X: np.ndarray, bin_edges: dict, feature_names: list) -> np.ndarray:
+    """
+    Map a continuous feature matrix to integer bin indices using precomputed edges.
+
+    Each value v in feature column f is assigned:
+        bin 0  (low)    if v <= bin_edges[f][0]
+        bin 1  (medium) if bin_edges[f][0] < v <= bin_edges[f][1]
+        ...
+        bin k  (high)   if v > bin_edges[f][k-1]
+
+    This function is the single source of truth for the low/medium/high
+    mapping.  Call it identically in both the SILVER training stage
+    (on bd_state) and the APG assignment stage (on trajectory X) so that
+    the decision tree always receives the same discrete representation.
+
+    Parameters
+    ----------
+    X            : (N, n_features) continuous feature matrix
+    bin_edges    : dict returned by compute_bin_edges()
+    feature_names: list of feature name strings matching X columns
+
+    Returns
+    -------
+    X_discrete : (N, n_features) integer array of bin indices (dtype int32)
+    """
+    X_discrete = np.zeros_like(X, dtype=np.int32)
+    for col_idx, name in enumerate(feature_names):
+        edges              = bin_edges[name]                    # shape (n_bins-1,)
+        X_discrete[:, col_idx] = np.digitize(X[:, col_idx], edges, right=True)
+        # np.digitize with right=True returns:
+        #   0  if v <= edges[0]   →  low
+        #   1  if edges[0] < v <= edges[1]  →  medium   (for n_bins=3)
+        #   2  if v > edges[1]   →  high
+    return X_discrete
+
+
+def _bin_edges_summary(bin_edges: dict, feature_names: list,
+                       n_bins: int, labels: list) -> str:
+    """
+    Build a human-readable summary of the discretization thresholds.
+
+    Example output (n_bins=3):
+        feat_mean_mtd_overhead    : (-inf, 0.2314] → low
+                                    (0.2314, 0.6821] → medium
+                                    (0.6821, +inf) → high
+        ...
+    """
+    lines = [f"Discretization scheme: {n_bins}-bin quantile  "
+             f"({' / '.join(labels)})\n"]
+    for name in feature_names:
+        edges = bin_edges[name]
+        lines.append(f"  {name}:")
+        thresholds = [-np.inf] + list(edges) + [np.inf]
+        for k in range(len(thresholds) - 1):
+            lo    = thresholds[k]
+            hi    = thresholds[k + 1]
+            label = labels[k] if k < len(labels) else str(k)
+            lo_str = f"{lo:.4f}" if np.isfinite(lo) else "-inf"
+            hi_str = f"{hi:.4f}" if np.isfinite(hi) else "+inf"
+            lines.append(f"    ({lo_str}, {hi_str}]  →  {label}  (bin {k})")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Step 6: Surrogate models
 # ---------------------------------------------------------------------------
 
 def _fit_decision_tree(bd_X: np.ndarray, bd_y: np.ndarray) -> DecisionTreeClassifier:
+    """
+    Fit a decision tree on the discretized boundary state features.
+
+    The tree is trained without constraining max_depth so that it can
+    fully capture the action boundaries in the discretized feature space.
+    Because the input is already discretized (integer bins), split
+    thresholds in the rendered tree correspond directly to bin indices
+    (e.g. feat_mean_network_penalty <= 0 means bin 0 i.e. 'low').
+    """
     dt = DecisionTreeClassifier(random_state=0)
     dt.fit(bd_X, bd_y)
     return dt
@@ -316,6 +461,14 @@ def _save_csv(arr: np.ndarray, columns: list, path: str):
 
 def _save_tree_plot(dt: DecisionTreeClassifier, feature_names: list,
                     class_names: list, title: str, path: str):
+    """
+    Render the decision tree to a PDF.
+
+    Because the tree was trained on discretized (integer bin) features,
+    split thresholds in the plot are bin indices.  The _bin_edges_summary
+    string saved in the formulas file provides the mapping back to
+    continuous value ranges, e.g. bin 0 → low → (−∞, 0.23].
+    """
     fig, ax = plt.subplots(figsize=(max(20, len(class_names) * 4), 12))
     plot_tree(dt, feature_names=feature_names, class_names=class_names,
               filled=True, impurity=False, ax=ax)
@@ -335,9 +488,11 @@ def run_silver_env(
     shap_dir: str,
     output_dir: str,
     n_clusters: int = None,
+    n_bins: int = DEFAULT_N_BINS,
 ):
     """
-    Full SILVER pipeline for one algorithm (env_action variant).
+    Full SILVER pipeline for one algorithm (env_action variant, Plan-B
+    quantile discretization).
 
     Parameters
     ----------
@@ -347,16 +502,19 @@ def run_silver_env(
                   (flat structure, no subdirectories)
     output_dir  : where to write silver_*_env outputs
     n_clusters  : KMeans k  (default: N_ACTIONS = 12)
+    n_bins      : number of quantile bins for discretization
+                  (default 3 → low / medium / high)
     """
     if n_clusters is None:
         n_clusters = N_ACTIONS
 
     tag = algo.lower() if algo != "Envelope" else "envelope"
-    print(f"\n{'='*60}\nSILVER (env_action): {algo}  (k={n_clusters})\n{'='*60}")
+    print(f"\n{'='*60}\nSILVER (env_action): {algo}  "
+          f"(k={n_clusters}, n_bins={n_bins})\n{'='*60}")
 
     # ── Step 1: load Φ_s and state features ──────────────────────────────
     shap_data     = _load_shap(algo, shap_dir)      # (N, 5)
-    X             = _load_state_features(df)         # (N, 5)
+    X             = _load_state_features(df)         # (N, 5) — full trajectory
     action_labels = _get_action_labels(df)           # (N,) — from env_action column
     N             = len(shap_data)
     print(f"  Loaded {N} samples,  Φ_s shape={shap_data.shape}")
@@ -379,7 +537,7 @@ def run_silver_env(
         boundary_points, X, shap_data, action_labels
     )
 
-    # save boundary datasets
+    # save boundary datasets (continuous values kept for reference)
     shap_cols  = [f"shap_{f}" for f in FEATURE_COLS]
     state_cols = list(FEATURE_COLS)
     ci_col     = [m[0] for m in meta]
@@ -393,6 +551,8 @@ def run_silver_env(
         os.path.join(output_dir, f"silver_{tag}_env_boundary_shap.csv"), index=False
     )
 
+    # continuous boundary state — saved for reference / debugging only;
+    # surrogate models are trained on the discretized version below
     bd_state_df           = pd.DataFrame(bd_state, columns=state_cols)
     bd_state_df["ci"]     = ci_col
     bd_state_df["cj"]     = cj_col
@@ -403,41 +563,89 @@ def run_silver_env(
     print(f"  Boundary datasets saved  (n={len(bd_y)}, "
           f"unique actions={sorted(set(bd_y.tolist()))})")
 
-    # ── Step 6: surrogate models (trained on state-space boundary points) ─
+    # ── Step 5b: quantile discretization (Plan B) ─────────────────────────
+    # Bin edges are computed from the full trajectory X so that thresholds
+    # reflect the true per-feature distribution, not just the 66 boundary
+    # points.  bin_edges is saved as a pkl so the APG stage can reuse the
+    # identical mapping when calling discretize(X_traj, bin_edges, ...).
     feature_names = list(FEATURE_COLS)
-    class_names   = [str(a) for a in sorted(set(bd_y.tolist()))]
+    labels        = BIN_LABELS[:n_bins]
+
+    bin_edges = compute_bin_edges(X, feature_names, n_bins=n_bins)
+    _save_pkl(
+        bin_edges,
+        os.path.join(output_dir, f"silver_{tag}_env_bin_edges.pkl"),
+    )
+    print(f"  Bin edges computed from {N} trajectory points "
+          f"({n_bins} bins: {' / '.join(labels)})")
+
+    # discretize boundary state — this is what the surrogate models receive
+    bd_state_discrete = discretize(bd_state, bin_edges, feature_names)
+
+    # save discretized boundary state for inspection
+    disc_cols = [f"{f}_bin" for f in feature_names]
+    bd_disc_df           = pd.DataFrame(bd_state_discrete, columns=disc_cols)
+    bd_disc_df["ci"]     = ci_col
+    bd_disc_df["cj"]     = cj_col
+    bd_disc_df["action"] = bd_y
+    bd_disc_df.to_csv(
+        os.path.join(output_dir, f"silver_{tag}_env_boundary_state_discrete.csv"),
+        index=False,
+    )
+    print(f"  Discretized boundary state saved  "
+          f"(shape={bd_state_discrete.shape})")
+
+    # ── Step 6: surrogate models (trained on discretized boundary points) ─
+    class_names = [str(a) for a in sorted(set(bd_y.tolist()))]
 
     # Decision Tree
-    dt = _fit_decision_tree(bd_state, bd_y)
+    # Split thresholds in the tree refer to bin indices (0=low, 1=medium,
+    # 2=high for n_bins=3).  Consult bin_edges for the corresponding
+    # continuous value intervals, which are written to the formulas file.
+    dt = _fit_decision_tree(bd_state_discrete, bd_y)
     _save_pkl(dt, os.path.join(output_dir, f"silver_{tag}_env_decision_tree.pkl"))
     _save_tree_plot(
         dt, feature_names, class_names,
-        title=f"SILVER Decision Tree (env_action) — {algo}",
+        title=f"SILVER Decision Tree (env_action, {n_bins}-bin) — {algo}",
         path=os.path.join(output_dir, f"silver_{tag}_env_decision_tree.pdf"),
     )
 
-    # Linear Regression
-    lr = _fit_linear_regression(bd_state, bd_y)
+    # Linear Regression (trained on discrete bins)
+    lr = _fit_linear_regression(bd_state_discrete, bd_y)
     _save_pkl(lr, os.path.join(output_dir, f"silver_{tag}_env_linear_regression.pkl"))
 
-    # Logistic Regression
+    # Logistic Regression (trained on discrete bins)
     if len(class_names) < 2:
         log_r = None
         print(f"  [WARNING] Only one action class ({class_names[0]}) among "
               f"boundary points — skipping Logistic Regression for {algo}.")
     else:
-        log_r = _fit_logistic_regression(bd_state, bd_y)
+        log_r = _fit_logistic_regression(bd_state_discrete, bd_y)
         _save_pkl(log_r, os.path.join(output_dir, f"silver_{tag}_env_logistic_regression.pkl"))
 
     # ── Step 7: formula strings ───────────────────────────────────────────
-    coeff_names  = [f"x{i+1}" for i in range(len(feature_names))]
-    formulas     = []
+    # Feature variable names for formula text; x1…x5 map to FEATURE_COLS.
+    coeff_names = [f"x{i+1}" for i in range(len(feature_names))]
+
+    formulas = []
     formulas.append(f"Feature mapping: {dict(enumerate(feature_names))}\n")
-    formulas.append("=== Decision Tree ===")
+
+    # Discretization summary — maps bin index back to continuous interval,
+    # e.g. feat_max_security_penalty: (0.34, 0.89] → medium (bin 1)
+    formulas.append("=== Discretization Scheme ===")
+    formulas.append(_bin_edges_summary(bin_edges, feature_names, n_bins, labels))
+
+    formulas.append("\n=== Decision Tree (trained on discretized features) ===")
+    formulas.append(
+        "Note: split thresholds are bin indices.  "
+        "See 'Discretization Scheme' above for continuous value ranges."
+    )
     formulas.append(export_text(dt, feature_names=feature_names))
-    formulas.append("\n=== Linear Regression ===")
+
+    formulas.append("\n=== Linear Regression (trained on discretized features) ===")
     formulas.append(_linear_formula(lr, coeff_names, fname="f"))
-    formulas.append("\n=== Logistic Regression ===")
+
+    formulas.append("\n=== Logistic Regression (trained on discretized features) ===")
     if log_r is None:
         formulas.append(
             f"Skipped: all {len(bd_y)} boundary points map to a single "
@@ -452,15 +660,17 @@ def run_silver_env(
         fh.write("\n".join(formulas))
     print(f"  Formulas saved → {formula_path}")
 
-    print(f"  ✓ SILVER (env_action) complete for {algo}")
+    print(f"  ✓ SILVER (env_action, Plan-B discretization) complete for {algo}")
     return {
-        "kmeans":   km,
-        "dt":       dt,
-        "lr":       lr,
-        "log_r":    log_r,
-        "bd_shap":  bd_shap,
-        "bd_state": bd_state,
-        "bd_y":     bd_y,
+        "kmeans":             km,
+        "bin_edges":          bin_edges,
+        "dt":                 dt,
+        "lr":                 lr,
+        "log_r":              log_r,
+        "bd_shap":            bd_shap,
+        "bd_state":           bd_state,
+        "bd_state_discrete":  bd_state_discrete,
+        "bd_y":               bd_y,
     }
 
 
@@ -471,14 +681,20 @@ def run_silver_env(
 ALGOS = ["DQN", "Envelope", "EUPG", "PPO", "A2C"]
 
 
-def run_all_env(df: pd.DataFrame, shap_dir: str, output_dir: str, n_clusters: int = None):
+def run_all_env(
+    df: pd.DataFrame,
+    shap_dir: str,
+    output_dir: str,
+    n_clusters: int = None,
+    n_bins: int = DEFAULT_N_BINS,
+):
     os.makedirs(output_dir, exist_ok=True)
     for algo in df["algo"].unique():
         if algo not in ALGOS:
             print(f"[WARNING] Unknown algo '{algo}', skipping.")
             continue
         algo_df = df[df["algo"] == algo].reset_index(drop=True)
-        run_silver_env(algo, algo_df, shap_dir, output_dir, n_clusters)
+        run_silver_env(algo, algo_df, shap_dir, output_dir, n_clusters, n_bins)
     print(f"\n✓ All SILVER (env_action) analyses complete. Outputs in: {output_dir}/")
 
 
@@ -488,7 +704,7 @@ def run_all_env(df: pd.DataFrame, shap_dir: str, output_dir: str, n_clusters: in
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="SILVER with RL-Guided Labeling (env_action variant)"
+        description="SILVER with RL-Guided Labeling (env_action variant, Plan-B discretization)"
     )
     parser.add_argument("--input",      required=True,
                         help="Original data CSV (must contain env_action column)")
@@ -502,6 +718,9 @@ if __name__ == "__main__":
                              "Omit to run all algos found in the CSV.")
     parser.add_argument("--n_clusters", type=int, default=None,
                         help=f"KMeans k (default: N_ACTIONS={N_ACTIONS})")
+    parser.add_argument("--n_bins",     type=int, default=DEFAULT_N_BINS,
+                        help=f"Number of quantile bins per feature "
+                             f"(default: {DEFAULT_N_BINS} → low / medium / high)")
     args = parser.parse_args()
 
     data = pd.read_csv(args.input)
@@ -515,6 +734,9 @@ if __name__ == "__main__":
         algo_df = data[data["algo"] == args.algo].reset_index(drop=True)
         if algo_df.empty:
             raise ValueError(f"No rows found for algo='{args.algo}'")
-        run_silver_env(args.algo, algo_df, args.shap_dir, args.output, args.n_clusters)
+        run_silver_env(
+            args.algo, algo_df, args.shap_dir, args.output,
+            args.n_clusters, args.n_bins,
+        )
     else:
-        run_all_env(data, args.shap_dir, args.output, args.n_clusters)
+        run_all_env(data, args.shap_dir, args.output, args.n_clusters, args.n_bins)
