@@ -1,0 +1,14 @@
+feature,mean_abs_shap,mean_shap
+feat_mean_remaining_reinst,1.7470198578457354,0.9538090399110368
+feat_total_ues,0.9295834034100812,0.60860969461701
+feat_mean_remaining_mig,0.8832298566872767,0.5094245193169359
+feat_vim0_ram,0.3932081758171296,0.13375017708496498
+feat_vim0_cpu,0.37878979388406564,0.13190306763923432
+feat_vim1_ram,0.36790072523309825,0.08703081521103964
+feat_vim1_cpu,0.3109369336236767,0.10382472568659261
+feat_max_apt_score,0.0,0.0
+feat_mean_apt_score,0.0,0.0
+feat_max_dataleak_score,0.0,0.0
+feat_mean_dataleak_score,0.0,0.0
+feat_max_dos_score,0.0,0.0
+feat_mean_dos_score,0.0,0.0

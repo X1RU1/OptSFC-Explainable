@@ -76,19 +76,63 @@ OBJ_COLORS = {
 }
 ALGOS = ["dqn", "envelope", "eupg", "ppo", "a2c"]
 
+# FEATURE_COLS = [
+#     "feat_mean_mtd_overhead",
+#     "feat_mean_network_penalty",
+#     "feat_max_network_penalty",
+#     "feat_mean_security_penalty",
+#     "feat_max_security_penalty",
+# ]
+# SHORT_NAMES = {
+#     "feat_mean_mtd_overhead":       "MTD\nOverhead",
+#     "feat_mean_network_penalty":    "Net Penalty\n(mean)",
+#     "feat_max_network_penalty":     "Net Penalty\n(max)",
+#     "feat_mean_security_penalty":   "Sec Penalty\n(mean)",
+#     "feat_max_security_penalty":    "Sec Penalty\n(max)",
+# }
+
 FEATURE_COLS = [
-    "feat_mean_mtd_overhead",
-    "feat_mean_network_penalty",
-    "feat_max_network_penalty",
-    "feat_mean_security_penalty",
-    "feat_max_security_penalty",
+    # --- Security ---
+    "feat_max_apt_score",           # apt cvss/asp score 
+    "feat_mean_apt_score",
+    "feat_max_dataleak_score",      # data_leak cvss/asp score 
+    "feat_mean_dataleak_score",
+    "feat_max_dos_score",           # dos cvss/asp score 
+    "feat_mean_dos_score",
+
+    # --- Resource ---
+    "feat_vim0_cpu",               
+    "feat_vim0_ram",
+    "feat_vim1_cpu",
+    "feat_vim1_ram",
+    "feat_mean_remaining_mig",
+    "feat_mean_remaining_reinst",
+
+    # --- Network ---
+    "feat_total_ues",              
 ]
+
 SHORT_NAMES = {
-    "feat_mean_mtd_overhead":       "MTD\nOverhead",
-    "feat_mean_network_penalty":    "Net Penalty\n(mean)",
-    "feat_max_network_penalty":     "Net Penalty\n(max)",
-    "feat_mean_security_penalty":   "Sec Penalty\n(mean)",
-    "feat_max_security_penalty":    "Sec Penalty\n(max)",
+    # --- Security ---
+    "feat_max_apt_score":            "APT\n(max)",
+    "feat_mean_apt_score":           "APT\n(mean)",
+    "feat_max_dataleak_score":       "Data Leak\n(max)",
+    "feat_mean_dataleak_score":      "Data Leak\n(mean)",
+    "feat_max_dos_score":            "DoS\n(max)",
+    "feat_mean_dos_score":           "DoS\n(mean)",
+
+    # --- Resource ---
+    "feat_vim0_cpu":                 "VIM0 CPU",
+    "feat_vim0_ram":                 "VIM0 RAM",
+    "feat_vim1_cpu":                 "VIM1 CPU",
+    "feat_vim1_ram":                 "VIM1 RAM",
+    "feat_min_remaining_mig":        "Migrate Budget\n(min)",
+    "feat_min_remaining_reinst":     "Restart Budget\n(min)",
+    "feat_mean_remaining_mig":       "Migrate Budget\n(mean)",
+    "feat_mean_remaining_reinst":    "Restart Budget\n(mean)",
+
+    # --- Network ---
+    "feat_total_ues":                "Total UEs",
 }
 
 ENVELOPE_OBJECTIVES = ["resource", "network", "security"]

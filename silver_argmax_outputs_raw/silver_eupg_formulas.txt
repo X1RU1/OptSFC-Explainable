@@ -1,0 +1,31 @@
+Feature mapping: {0: 'feat_max_apt_score', 1: 'feat_mean_apt_score', 2: 'feat_max_dataleak_score', 3: 'feat_mean_dataleak_score', 4: 'feat_max_dos_score', 5: 'feat_mean_dos_score', 6: 'feat_vim0_cpu', 7: 'feat_vim0_ram', 8: 'feat_vim1_cpu', 9: 'feat_vim1_ram', 10: 'feat_mean_remaining_mig', 11: 'feat_mean_remaining_reinst', 12: 'feat_total_ues'}
+
+=== Decision Tree ===
+|--- feat_vim1_ram <= 111.41
+|   |--- feat_mean_remaining_reinst <= 893.29
+|   |   |--- feat_vim1_ram <= 90.94
+|   |   |   |--- class: 1
+|   |   |--- feat_vim1_ram >  90.94
+|   |   |   |--- class: 8
+|   |--- feat_mean_remaining_reinst >  893.29
+|   |   |--- feat_vim1_ram <= 108.56
+|   |   |   |--- class: 8
+|   |   |--- feat_vim1_ram >  108.56
+|   |   |   |--- feat_mean_remaining_mig <= 174.43
+|   |   |   |   |--- class: 8
+|   |   |   |--- feat_mean_remaining_mig >  174.43
+|   |   |   |   |--- feat_vim0_ram <= 181.44
+|   |   |   |   |   |--- class: 8
+|   |   |   |   |--- feat_vim0_ram >  181.44
+|   |   |   |   |   |--- class: 5
+|--- feat_vim1_ram >  111.41
+|   |--- class: 5
+
+
+=== Linear Regression ===
+f(x) = -5.7875e+01 + 2.8883e-16·x2 + 1.9518e-01·x7 - 1.7261e-02·x8 - 1.4791e-01·x9 + 1.6285e-01·x10 - 3.3918e-02·x11 + 5.8766e-02·x12 - 2.0498e-04·x13
+
+=== Logistic Regression ===
+f_1(x) = -3.2592e-05 - 1.7922e-04*x1 - 5.1205e-05*x2 - 2.2670e-04*x3 - 1.0572e-04*x4 - 2.4439e-04*x5 - 3.4913e-05*x6 - 1.3650e-03*x7 + 5.9007e-02*x8 - 6.0309e-02*x9 - 1.6737e-01*x10 - 4.8543e-02*x11 + 7.4153e-03*x12 + 6.5812e-02*x13
+f_5(x) = -5.2363e-05 - 2.8544e-04*x1 - 8.1554e-05*x2 - 3.6105e-04*x3 - 1.6838e-04*x4 - 3.8923e-04*x5 - 5.5605e-05*x6 - 7.5512e-02*x7 - 1.1388e-01*x8 + 8.7616e-02*x9 + 1.3966e-01*x10 + 2.4516e-02*x11 + 5.9007e-03*x12 - 5.6118e-02*x13
+f_8(x) = 8.4955e-05 + 4.6466e-04*x1 + 1.3276e-04*x2 + 5.8775e-04*x3 + 2.7410e-04*x4 + 6.3362e-04*x5 + 9.0518e-05*x6 + 7.6877e-02*x7 + 5.4874e-02*x8 - 2.7308e-02*x9 + 2.7717e-02*x10 + 2.4028e-02*x11 - 1.3316e-02*x12 - 9.6933e-03*x13

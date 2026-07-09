@@ -86,18 +86,47 @@ import numpy as np
 import pandas as pd
 import shap
 
+from scipy.spatial.distance import cdist
+
 warnings.filterwarnings("ignore")
 
 # ---------------------------------------------------------------------------
 # Objective-related features only (5 total)
 # ---------------------------------------------------------------------------
 
+# FEATURE_COLS = [
+#     "feat_mean_mtd_overhead",       # Resource: MTD operation cost
+#     "feat_mean_network_penalty",    # Network:  mean penalty
+#     "feat_max_network_penalty",     # Network:  max  penalty
+#     "feat_mean_security_penalty",   # Security: mean penalty
+#     "feat_max_security_penalty",    # Security: max  penalty
+# ]
+
+
+# ---------------------------------------------------------------------------
+# Low-level features 
+# ---------------------------------------------------------------------------
+
+
 FEATURE_COLS = [
-    "feat_mean_mtd_overhead",       # Resource: MTD operation cost
-    "feat_mean_network_penalty",    # Network:  mean penalty
-    "feat_max_network_penalty",     # Network:  max  penalty
-    "feat_mean_security_penalty",   # Security: mean penalty
-    "feat_max_security_penalty",    # Security: max  penalty
+    # --- Security ---
+    "feat_max_apt_score",           # apt cvss/asp score 
+    "feat_mean_apt_score",
+    "feat_max_dataleak_score",      # data_leak cvss/asp score 
+    "feat_mean_dataleak_score",
+    "feat_max_dos_score",           # dos cvss/asp score 
+    "feat_mean_dos_score",
+
+    # --- Resource ---
+    "feat_vim0_cpu",               
+    "feat_vim0_ram",
+    "feat_vim1_cpu",
+    "feat_vim1_ram",
+    "feat_mean_remaining_mig",
+    "feat_mean_remaining_reinst",
+
+    # --- Network ---
+    "feat_total_ues",              
 ]
 
 N_ACTIONS = 12
@@ -128,12 +157,15 @@ def _get_features(df: pd.DataFrame) -> np.ndarray:
     return df[FEATURE_COLS].values.astype(np.float64)
 
 
-def _background(X: np.ndarray) -> np.ndarray:
-    """Select background dataset (1% of data, min BACKGROUND_MIN rows)."""
+def _background(X: np.ndarray):
+    """Select background dataset (1% of data, min BACKGROUND_MIN rows).
+    Returns (background_X, background_indices) so callers can look up
+    the corresponding rows in other aligned arrays (e.g. action_matrix).
+    """
     n = max(BACKGROUND_MIN, int(len(X) * BACKGROUND_RATIO))
     n = min(n, len(X))
     idx = np.random.default_rng(42).choice(len(X), size=n, replace=False)
-    return X[idx]
+    return X[idx], idx
 
 
 # ---------------------------------------------------------------------------
@@ -160,27 +192,27 @@ def _compute_shap_chosen(
                   corresponding to the chosen action (same as paper's
                   shap_values[sample_idx, :, actions])
     """
-    bg = _background(X)
+    bg, bg_idx = _background(X)  # bg: (n_bg, n_features), bg_idx: (n_bg,) row indices into X
 
-    # f maps a feature matrix (M, n_features) → (M, n_actions)
-    # KernelExplainer calls f on subsets of X; we look up the precomputed
-    # action values by nearest neighbour in feature space (exact match for
-    # rows that exist in X, interpolated otherwise via the lookup table).
-    #
-    # Implementation: build a lookup from X rows → action_matrix rows.
-    # For unseen interpolated points (kernel perturbations), we use the
-    # closest row in X by L2 distance.
-    X_ref = X
-    Y_ref = action_matrix
+    # Standardize features before nearest-neighbour lookup so that
+    # large-magnitude features (e.g. feat_total_ues) don't dominate the
+    # distance metric and suppress SHAP attribution on smaller-scale
+    # penalty/score features.
+    feat_mean = X.mean(axis=0)
+    feat_std  = X.std(axis=0)
+    feat_std[feat_std == 0] = 1.0  # avoid div-by-zero on constant features
+
+    X_ref_scaled = (bg - feat_mean) / feat_std   # (n_bg, n_features)
+    Y_ref        = action_matrix[bg_idx]         # (n_bg, n_actions) — rows aligned to bg via bg_idx
 
     def policy_fn(x_subset: np.ndarray) -> np.ndarray:
         # x_subset: (M, n_features) — perturbed feature rows from KernelExplainer
-        # Find nearest neighbour in X_ref for each perturbed row
-        dists = np.sum((x_subset[:, None, :] - X_ref[None, :, :]) ** 2, axis=2)
-        nn_idx = np.argmin(dists, axis=1)
+        x_scaled = (x_subset - feat_mean) / feat_std
+        dists    = cdist(x_scaled, X_ref_scaled, metric="sqeuclidean")  # (M, n_bg)
+        nn_idx   = np.argmin(dists, axis=1)
         return Y_ref[nn_idx]  # (M, n_actions)
 
-    explainer = shap.KernelExplainer(policy_fn, bg)
+    explainer = shap.KernelExplainer(policy_fn, bg)  # bg passed raw; policy_fn scales internally
     sv_list   = explainer.shap_values(X, nsamples="auto", silent=True)
 
     # KernelExplainer multi-output returns either:
@@ -208,7 +240,7 @@ def _compute_shap_chosen(
     shap_chosen = sv_3d[sample_idx, :, chosen_actions]  # (N, n_features)
     return shap_chosen
 
-
+    
 def _save_result(shap_chosen: np.ndarray, tag: str, output_dir: str) -> None:
     """Save Φ_s matrix and per-feature summary."""
     # Raw Φ_s

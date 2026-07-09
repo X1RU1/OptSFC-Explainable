@@ -109,12 +109,33 @@ warnings.filterwarnings("ignore")
 # Constants — must match shap_explain_env_action.py
 # ---------------------------------------------------------------------------
 
+# FEATURE_COLS = [
+#     "feat_mean_mtd_overhead",
+#     "feat_mean_network_penalty",
+#     "feat_max_network_penalty",
+#     "feat_mean_security_penalty",
+#     "feat_max_security_penalty",
+# ]
+
 FEATURE_COLS = [
-    "feat_mean_mtd_overhead",
-    "feat_mean_network_penalty",
-    "feat_max_network_penalty",
-    "feat_mean_security_penalty",
-    "feat_max_security_penalty",
+    # --- Security ---
+    "feat_max_apt_score",           # apt cvss/asp score 
+    "feat_mean_apt_score",
+    "feat_max_dataleak_score",      # data_leak cvss/asp score 
+    "feat_mean_dataleak_score",
+    "feat_max_dos_score",           # dos cvss/asp score 
+    "feat_mean_dos_score",
+
+    # --- Resource ---
+    "feat_vim0_cpu",               
+    "feat_vim0_ram",
+    "feat_vim1_cpu",
+    "feat_vim1_ram",
+    "feat_mean_remaining_mig",
+    "feat_mean_remaining_reinst",
+
+    # --- Network ---
+    "feat_total_ues",              
 ]
 
 N_ACTIONS      = 12

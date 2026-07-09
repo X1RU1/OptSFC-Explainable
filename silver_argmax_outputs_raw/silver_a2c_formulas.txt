@@ -1,0 +1,32 @@
+Feature mapping: {0: 'feat_max_apt_score', 1: 'feat_mean_apt_score', 2: 'feat_max_dataleak_score', 3: 'feat_mean_dataleak_score', 4: 'feat_max_dos_score', 5: 'feat_mean_dos_score', 6: 'feat_vim0_cpu', 7: 'feat_vim0_ram', 8: 'feat_vim1_cpu', 9: 'feat_vim1_ram', 10: 'feat_mean_remaining_mig', 11: 'feat_mean_remaining_reinst', 12: 'feat_total_ues'}
+
+=== Decision Tree ===
+|--- feat_mean_remaining_mig <= 122.93
+|   |--- feat_mean_remaining_reinst <= 869.36
+|   |   |--- class: 1
+|   |--- feat_mean_remaining_reinst >  869.36
+|   |   |--- feat_total_ues <= 25.00
+|   |   |   |--- feat_mean_remaining_reinst <= 943.86
+|   |   |   |   |--- class: 2
+|   |   |   |--- feat_mean_remaining_reinst >  943.86
+|   |   |   |   |--- feat_mean_remaining_mig <= 97.36
+|   |   |   |   |   |--- class: 4
+|   |   |   |   |--- feat_mean_remaining_mig >  97.36
+|   |   |   |   |   |--- class: 2
+|   |   |--- feat_total_ues >  25.00
+|   |   |   |--- feat_vim0_ram <= 180.44
+|   |   |   |   |--- class: 2
+|   |   |   |--- feat_vim0_ram >  180.44
+|   |   |   |   |--- class: 7
+|--- feat_mean_remaining_mig >  122.93
+|   |--- class: 7
+
+
+=== Linear Regression ===
+f(x) = 6.9283e+01 - 1.4502e-15·x2 - 6.0715e-16·x3 - 2.9490e-16·x6 + 5.3704e-01·x7 - 3.0622e-01·x8 + 7.9816e-01·x9 - 5.0660e-01·x10 + 2.2900e-02·x11 + 1.7028e-02·x12 - 4.6434e-02·x13
+
+=== Logistic Regression ===
+f_1(x) = 4.7889e-04 + 2.6226e-03*x1 + 7.4931e-04*x2 + 3.3174e-03*x3 + 1.5471e-03*x4 + 3.5763e-03*x5 + 5.1089e-04*x6 + 8.2902e-03*x7 + 8.6025e-02*x8 + 1.1170e-02*x9 + 4.5754e-02*x10 - 2.0270e-01*x11 - 7.0583e-03*x12 - 1.5438e-02*x13
+f_2(x) = -1.4852e-04 - 8.1319e-04*x1 - 2.3234e-04*x2 - 1.0286e-03*x3 - 4.7970e-04*x4 - 1.1089e-03*x5 - 1.5841e-04*x6 - 1.4034e-02*x7 - 2.0700e-02*x8 - 4.7948e-03*x9 - 2.5008e-02*x10 - 8.8906e-03*x11 + 1.1736e-02*x12 + 3.8782e-02*x13
+f_4(x) = -1.4569e-04 - 7.9853e-04*x1 - 2.2815e-04*x2 - 1.0101e-03*x3 - 4.7105e-04*x4 - 1.0889e-03*x5 - 1.5556e-04*x6 - 1.8751e-03*x7 - 3.6690e-02*x8 - 3.2957e-04*x9 + 3.4739e-03*x10 + 3.2779e-02*x11 + 4.9983e-03*x12 - 2.2702e-02*x13
+f_7(x) = -1.8468e-04 - 1.0109e-03*x1 - 2.8882e-04*x2 - 1.2787e-03*x3 - 5.9631e-04*x4 - 1.3785e-03*x5 - 1.9692e-04*x6 + 7.6191e-03*x7 - 2.8635e-02*x8 - 6.0453e-03*x9 - 2.4220e-02*x10 + 1.7882e-01*x11 - 9.6758e-03*x12 - 6.4226e-04*x13

@@ -1,0 +1,42 @@
+Feature mapping: {0: 'feat_max_apt_score', 1: 'feat_mean_apt_score', 2: 'feat_max_dataleak_score', 3: 'feat_mean_dataleak_score', 4: 'feat_max_dos_score', 5: 'feat_mean_dos_score', 6: 'feat_vim0_cpu', 7: 'feat_vim0_ram', 8: 'feat_vim1_cpu', 9: 'feat_vim1_ram', 10: 'feat_mean_remaining_mig', 11: 'feat_mean_remaining_reinst', 12: 'feat_total_ues'}
+
+=== Decision Tree ===
+|--- feat_mean_remaining_mig <= 146.71
+|   |--- feat_mean_remaining_reinst <= 872.79
+|   |   |--- class: 8
+|   |--- feat_mean_remaining_reinst >  872.79
+|   |   |--- feat_total_ues <= 47.50
+|   |   |   |--- class: 9
+|   |   |--- feat_total_ues >  47.50
+|   |   |   |--- feat_vim0_ram <= 190.56
+|   |   |   |   |--- feat_mean_remaining_mig <= 143.71
+|   |   |   |   |   |--- class: 5
+|   |   |   |   |--- feat_mean_remaining_mig >  143.71
+|   |   |   |   |   |--- class: 9
+|   |   |   |--- feat_vim0_ram >  190.56
+|   |   |   |   |--- class: 9
+|--- feat_mean_remaining_mig >  146.71
+|   |--- feat_vim1_cpu <= 23.00
+|   |   |--- class: 8
+|   |--- feat_vim1_cpu >  23.00
+|   |   |--- feat_total_ues <= 34.50
+|   |   |   |--- class: 2
+|   |   |--- feat_total_ues >  34.50
+|   |   |   |--- feat_vim0_ram <= 181.44
+|   |   |   |   |--- feat_vim1_cpu <= 25.00
+|   |   |   |   |   |--- class: 8
+|   |   |   |   |--- feat_vim1_cpu >  25.00
+|   |   |   |   |   |--- class: 7
+|   |   |   |--- feat_vim0_ram >  181.44
+|   |   |   |   |--- class: 7
+
+
+=== Linear Regression ===
+f(x) = 5.6379e+01 - 1.4572e-16·x6 + 2.8677e-01·x7 - 1.0055e-01·x8 + 2.5197e-01·x9 - 1.5164e-01·x10 + 1.6157e-02·x11 - 2.8311e-02·x12 - 8.9975e-03·x13
+
+=== Logistic Regression ===
+f_2(x) = -2.2342e-05 - 1.2199e-04*x1 - 3.4854e-05*x2 - 1.5430e-04*x3 - 7.1960e-05*x4 - 1.6635e-04*x5 - 2.3764e-05*x6 - 2.3286e-02*x7 - 4.7584e-02*x8 + 3.9832e-02*x9 + 6.7762e-02*x10 + 1.4939e-02*x11 - 8.4488e-04*x12 - 4.2762e-02*x13
+f_5(x) = -8.5459e-05 - 4.6829e-04*x1 - 1.3380e-04*x2 - 5.9235e-04*x3 - 2.7624e-04*x4 - 6.3858e-04*x5 - 9.1226e-05*x6 - 2.1020e-02*x7 - 3.7029e-02*x8 - 4.2795e-02*x9 - 5.7234e-02*x10 - 3.1934e-02*x11 + 1.9207e-02*x12 + 1.6434e-02*x13
+f_7(x) = -4.9301e-05 - 2.6972e-04*x1 - 7.7064e-05*x2 - 3.4118e-04*x3 - 1.5911e-04*x4 - 3.6780e-04*x5 - 5.2543e-05*x6 - 5.2222e-02*x7 - 5.4231e-02*x8 + 7.3989e-02*x9 + 8.4572e-02*x10 + 3.4616e-02*x11 - 1.0529e-02*x12 + 9.7125e-02*x13
+f_8(x) = 3.2060e-04 + 1.7566e-03*x1 + 5.0189e-04*x2 + 2.2220e-03*x3 + 1.0362e-03*x4 + 2.3954e-03*x5 + 3.4220e-04*x6 + 6.0527e-02*x7 + 9.4954e-02*x8 - 4.0012e-02*x9 + 1.6752e-02*x10 + 3.0035e-02*x11 - 2.3672e-02*x12 + 6.0706e-03*x13
+f_9(x) = -1.6349e-04 - 8.9660e-04*x1 - 2.5617e-04*x2 - 1.1341e-03*x3 - 5.2890e-04*x4 - 1.2226e-03*x5 - 1.7466e-04*x6 + 3.6001e-02*x7 + 4.3889e-02*x8 - 3.1014e-02*x9 - 1.1185e-01*x10 - 4.7656e-02*x11 + 1.5839e-02*x12 - 7.6868e-02*x13

@@ -1,0 +1,208 @@
+Feature mapping: {0: 'feat_max_apt_score', 1: 'feat_mean_apt_score', 2: 'feat_max_dataleak_score', 3: 'feat_mean_dataleak_score', 4: 'feat_max_dos_score', 5: 'feat_mean_dos_score', 6: 'feat_vim0_cpu', 7: 'feat_vim0_ram', 8: 'feat_vim1_cpu', 9: 'feat_vim1_ram', 10: 'feat_mean_remaining_mig', 11: 'feat_mean_remaining_reinst', 12: 'feat_total_ues'}
+
+=== Discretization Scheme ===
+Discretization scheme: 3-bin quantile  (low / medium / high)
+
+  feat_max_apt_score:
+    (-inf, 5.5000]  →  low  (bin 0)
+    (5.5000, 5.5000]  →  medium  (bin 1)
+    (5.5000, +inf]  →  high  (bin 2)
+  feat_mean_apt_score:
+    (-inf, 1.5714]  →  low  (bin 0)
+    (1.5714, 1.5714]  →  medium  (bin 1)
+    (1.5714, +inf]  →  high  (bin 2)
+  feat_max_dataleak_score:
+    (-inf, 6.9570]  →  low  (bin 0)
+    (6.9570, 6.9570]  →  medium  (bin 1)
+    (6.9570, +inf]  →  high  (bin 2)
+  feat_mean_dataleak_score:
+    (-inf, 3.2444]  →  low  (bin 0)
+    (3.2444, 3.2444]  →  medium  (bin 1)
+    (3.2444, +inf]  →  high  (bin 2)
+  feat_max_dos_score:
+    (-inf, 7.5000]  →  low  (bin 0)
+    (7.5000, 7.5000]  →  medium  (bin 1)
+    (7.5000, +inf]  →  high  (bin 2)
+  feat_mean_dos_score:
+    (-inf, 1.0714]  →  low  (bin 0)
+    (1.0714, 1.0714]  →  medium  (bin 1)
+    (1.0714, +inf]  →  high  (bin 2)
+  feat_vim0_cpu:
+    (-inf, 20.0000]  →  low  (bin 0)
+    (20.0000, 24.0000]  →  medium  (bin 1)
+    (24.0000, +inf]  →  high  (bin 2)
+  feat_vim0_ram:
+    (-inf, 186.5000]  →  low  (bin 0)
+    (186.5000, 192.6250]  →  medium  (bin 1)
+    (192.6250, +inf]  →  high  (bin 2)
+  feat_vim1_cpu:
+    (-inf, 16.0000]  →  low  (bin 0)
+    (16.0000, 20.0000]  →  medium  (bin 1)
+    (20.0000, +inf]  →  high  (bin 2)
+  feat_vim1_ram:
+    (-inf, 96.0000]  →  low  (bin 0)
+    (96.0000, 102.3750]  →  medium  (bin 1)
+    (102.3750, +inf]  →  high  (bin 2)
+  feat_mean_remaining_mig:
+    (-inf, 83.2857]  →  low  (bin 0)
+    (83.2857, 170.1429]  →  medium  (bin 1)
+    (170.1429, +inf]  →  high  (bin 2)
+  feat_mean_remaining_reinst:
+    (-inf, 910.5714]  →  low  (bin 0)
+    (910.5714, 969.8095]  →  medium  (bin 1)
+    (969.8095, +inf]  →  high  (bin 2)
+  feat_total_ues:
+    (-inf, 41.0000]  →  low  (bin 0)
+    (41.0000, 52.0000]  →  medium  (bin 1)
+    (52.0000, +inf]  →  high  (bin 2)
+
+=== Decision Tree (trained on discretized features) ===
+Note: split thresholds are bin indices.  See 'Discretization Scheme' above for continuous value ranges.
+|--- feat_vim1_cpu <= 1.50
+|   |--- feat_vim0_cpu <= 1.50
+|   |   |--- feat_vim1_cpu <= 0.50
+|   |   |   |--- feat_total_ues <= 0.50
+|   |   |   |   |--- feat_vim1_ram <= 0.50
+|   |   |   |   |   |--- feat_mean_remaining_mig <= 0.50
+|   |   |   |   |   |   |--- class: 1
+|   |   |   |   |   |--- feat_mean_remaining_mig >  0.50
+|   |   |   |   |   |   |--- class: 11
+|   |   |   |   |--- feat_vim1_ram >  0.50
+|   |   |   |   |   |--- class: 11
+|   |   |   |--- feat_total_ues >  0.50
+|   |   |   |   |--- feat_vim1_ram <= 0.50
+|   |   |   |   |   |--- feat_vim0_ram <= 1.50
+|   |   |   |   |   |   |--- feat_mean_remaining_mig <= 0.50
+|   |   |   |   |   |   |   |--- class: 1
+|   |   |   |   |   |   |--- feat_mean_remaining_mig >  0.50
+|   |   |   |   |   |   |   |--- feat_mean_remaining_reinst <= 1.50
+|   |   |   |   |   |   |   |   |--- feat_total_ues <= 1.50
+|   |   |   |   |   |   |   |   |   |--- feat_vim0_cpu <= 0.50
+|   |   |   |   |   |   |   |   |   |   |--- class: 10
+|   |   |   |   |   |   |   |   |   |--- feat_vim0_cpu >  0.50
+|   |   |   |   |   |   |   |   |   |   |--- class: 11
+|   |   |   |   |   |   |   |   |--- feat_total_ues >  1.50
+|   |   |   |   |   |   |   |   |   |--- class: 1
+|   |   |   |   |   |   |   |--- feat_mean_remaining_reinst >  1.50
+|   |   |   |   |   |   |   |   |--- class: 1
+|   |   |   |   |   |--- feat_vim0_ram >  1.50
+|   |   |   |   |   |   |--- class: 6
+|   |   |   |   |--- feat_vim1_ram >  0.50
+|   |   |   |   |   |--- feat_mean_remaining_reinst <= 1.50
+|   |   |   |   |   |   |--- class: 8
+|   |   |   |   |   |--- feat_mean_remaining_reinst >  1.50
+|   |   |   |   |   |   |--- class: 9
+|   |   |--- feat_vim1_cpu >  0.50
+|   |   |   |--- feat_mean_remaining_reinst <= 0.50
+|   |   |   |   |--- feat_vim0_ram <= 1.50
+|   |   |   |   |   |--- feat_total_ues <= 0.50
+|   |   |   |   |   |   |--- class: 3
+|   |   |   |   |   |--- feat_total_ues >  0.50
+|   |   |   |   |   |   |--- feat_vim0_cpu <= 0.50
+|   |   |   |   |   |   |   |--- class: 4
+|   |   |   |   |   |   |--- feat_vim0_cpu >  0.50
+|   |   |   |   |   |   |   |--- feat_vim1_ram <= 1.50
+|   |   |   |   |   |   |   |   |--- feat_total_ues <= 1.50
+|   |   |   |   |   |   |   |   |   |--- class: 7
+|   |   |   |   |   |   |   |   |--- feat_total_ues >  1.50
+|   |   |   |   |   |   |   |   |   |--- class: 2
+|   |   |   |   |   |   |   |--- feat_vim1_ram >  1.50
+|   |   |   |   |   |   |   |   |--- feat_total_ues <= 1.50
+|   |   |   |   |   |   |   |   |   |--- class: 10
+|   |   |   |   |   |   |   |   |--- feat_total_ues >  1.50
+|   |   |   |   |   |   |   |   |   |--- class: 11
+|   |   |   |   |--- feat_vim0_ram >  1.50
+|   |   |   |   |   |--- class: 8
+|   |   |   |--- feat_mean_remaining_reinst >  0.50
+|   |   |   |   |--- feat_vim0_ram <= 1.50
+|   |   |   |   |   |--- feat_total_ues <= 1.50
+|   |   |   |   |   |   |--- feat_vim0_ram <= 0.50
+|   |   |   |   |   |   |   |--- feat_mean_remaining_mig <= 1.50
+|   |   |   |   |   |   |   |   |--- feat_total_ues <= 0.50
+|   |   |   |   |   |   |   |   |   |--- class: 6
+|   |   |   |   |   |   |   |   |--- feat_total_ues >  0.50
+|   |   |   |   |   |   |   |   |   |--- class: 0
+|   |   |   |   |   |   |   |--- feat_mean_remaining_mig >  1.50
+|   |   |   |   |   |   |   |   |--- feat_vim1_ram <= 1.50
+|   |   |   |   |   |   |   |   |   |--- class: 4
+|   |   |   |   |   |   |   |   |--- feat_vim1_ram >  1.50
+|   |   |   |   |   |   |   |   |   |--- feat_total_ues <= 0.50
+|   |   |   |   |   |   |   |   |   |   |--- class: 8
+|   |   |   |   |   |   |   |   |   |--- feat_total_ues >  0.50
+|   |   |   |   |   |   |   |   |   |   |--- class: 1
+|   |   |   |   |   |   |--- feat_vim0_ram >  0.50
+|   |   |   |   |   |   |   |--- feat_total_ues <= 0.50
+|   |   |   |   |   |   |   |   |--- class: 0
+|   |   |   |   |   |   |   |--- feat_total_ues >  0.50
+|   |   |   |   |   |   |   |   |--- feat_vim1_ram <= 1.50
+|   |   |   |   |   |   |   |   |   |--- class: 8
+|   |   |   |   |   |   |   |   |--- feat_vim1_ram >  1.50
+|   |   |   |   |   |   |   |   |   |--- feat_mean_remaining_reinst <= 1.50
+|   |   |   |   |   |   |   |   |   |   |--- class: 7
+|   |   |   |   |   |   |   |   |   |--- feat_mean_remaining_reinst >  1.50
+|   |   |   |   |   |   |   |   |   |   |--- class: 8
+|   |   |   |   |   |--- feat_total_ues >  1.50
+|   |   |   |   |   |   |--- feat_vim1_ram <= 1.50
+|   |   |   |   |   |   |   |--- feat_vim0_ram <= 0.50
+|   |   |   |   |   |   |   |   |--- class: 3
+|   |   |   |   |   |   |   |--- feat_vim0_ram >  0.50
+|   |   |   |   |   |   |   |   |--- class: 1
+|   |   |   |   |   |   |--- feat_vim1_ram >  1.50
+|   |   |   |   |   |   |   |--- class: 4
+|   |   |   |   |--- feat_vim0_ram >  1.50
+|   |   |   |   |   |--- class: 7
+|   |--- feat_vim0_cpu >  1.50
+|   |   |--- feat_mean_remaining_reinst <= 1.50
+|   |   |   |--- feat_mean_remaining_reinst <= 0.50
+|   |   |   |   |--- feat_total_ues <= 1.50
+|   |   |   |   |   |--- class: 2
+|   |   |   |   |--- feat_total_ues >  1.50
+|   |   |   |   |   |--- class: 3
+|   |   |   |--- feat_mean_remaining_reinst >  0.50
+|   |   |   |   |--- feat_total_ues <= 1.50
+|   |   |   |   |   |--- feat_total_ues <= 0.50
+|   |   |   |   |   |   |--- class: 0
+|   |   |   |   |   |--- feat_total_ues >  0.50
+|   |   |   |   |   |   |--- class: 7
+|   |   |   |   |--- feat_total_ues >  1.50
+|   |   |   |   |   |--- class: 0
+|   |   |--- feat_mean_remaining_reinst >  1.50
+|   |   |   |--- feat_total_ues <= 0.50
+|   |   |   |   |--- class: 3
+|   |   |   |--- feat_total_ues >  0.50
+|   |   |   |   |--- class: 3
+|--- feat_vim1_cpu >  1.50
+|   |--- feat_mean_remaining_mig <= 0.50
+|   |   |--- feat_total_ues <= 1.00
+|   |   |   |--- class: 7
+|   |   |--- feat_total_ues >  1.00
+|   |   |   |--- class: 10
+|   |--- feat_mean_remaining_mig >  0.50
+|   |   |--- feat_total_ues <= 1.50
+|   |   |   |--- feat_mean_remaining_reinst <= 1.50
+|   |   |   |   |--- class: 10
+|   |   |   |--- feat_mean_remaining_reinst >  1.50
+|   |   |   |   |--- feat_total_ues <= 0.50
+|   |   |   |   |   |--- class: 6
+|   |   |   |   |--- feat_total_ues >  0.50
+|   |   |   |   |   |--- class: 2
+|   |   |--- feat_total_ues >  1.50
+|   |   |   |--- class: 5
+
+
+=== Linear Regression (trained on discretized features) ===
+f(x) = 5.5907e+00 + 1.1102e-16·x2 + 1.4433e-15·x3 - 3.3307e-16·x4 + 4.4409e-16·x6 - 3.2146e+00·x7 + 3.3953e+00·x8 - 1.1410e-01·x9 + 1.9173e+00·x10 - 4.7379e-01·x11 - 4.7379e-01·x12 - 7.6944e-01·x13
+
+=== Logistic Regression (trained on discretized features) ===
+f_0(x) = -7.4007e-01 + 0.0000e+00*x1 + 0.0000e+00*x2 + 0.0000e+00*x3 + 0.0000e+00*x4 + 0.0000e+00*x5 + 0.0000e+00*x6 + 5.0497e-01*x7 + 1.7660e-01*x8 - 1.6168e-01*x9 + 1.1480e-02*x10 + 1.7548e-01*x11 + 1.7548e-01*x12 - 2.2605e-01*x13
+f_1(x) = 1.8338e+00 + 0.0000e+00*x1 + 0.0000e+00*x2 + 0.0000e+00*x3 + 0.0000e+00*x4 + 0.0000e+00*x5 + 0.0000e+00*x6 - 2.2321e-01*x7 - 7.4041e-01*x8 - 7.3498e-01*x9 - 7.5858e-01*x10 + 1.0390e-01*x11 + 1.0390e-01*x12 + 2.3060e-01*x13
+f_2(x) = 6.5336e-01 + 0.0000e+00*x1 + 0.0000e+00*x2 + 0.0000e+00*x3 + 0.0000e+00*x4 + 0.0000e+00*x5 + 0.0000e+00*x6 + 2.5035e-01*x7 - 5.8138e-02*x8 + 3.0110e-01*x9 - 2.8249e-01*x10 - 3.5786e-01*x11 - 3.5786e-01*x12 - 2.0325e-01*x13
+f_3(x) = -3.0794e-01 + 0.0000e+00*x1 + 0.0000e+00*x2 + 0.0000e+00*x3 + 0.0000e+00*x4 + 0.0000e+00*x5 + 0.0000e+00*x6 + 5.5071e-01*x7 + 1.3237e-01*x8 + 5.3063e-02*x9 - 5.1770e-01*x10 + 8.5788e-02*x11 + 8.5788e-02*x12 + 1.4978e-02*x13
+f_4(x) = -3.3711e-02 + 0.0000e+00*x1 + 0.0000e+00*x2 + 0.0000e+00*x3 + 0.0000e+00*x4 + 0.0000e+00*x5 + 0.0000e+00*x6 - 2.1199e-01*x7 - 4.7545e-01*x8 - 3.2334e-01*x9 - 2.5271e-01*x10 + 2.5469e-01*x11 + 2.5469e-01*x12 + 4.5353e-01*x13
+f_5(x) = -6.3665e-01 + 0.0000e+00*x1 + 0.0000e+00*x2 + 0.0000e+00*x3 + 0.0000e+00*x4 + 0.0000e+00*x5 + 0.0000e+00*x6 + 1.2689e-02*x7 - 2.4635e-01*x8 + 2.3742e-01*x9 - 2.1810e-01*x10 - 1.3255e-01*x11 - 1.3255e-01*x12 + 6.2971e-01*x13
+f_6(x) = -9.4647e-02 + 0.0000e+00*x1 + 0.0000e+00*x2 + 0.0000e+00*x3 + 0.0000e+00*x4 + 0.0000e+00*x5 + 0.0000e+00*x6 - 6.1382e-01*x7 + 1.5906e-01*x8 + 3.2113e-01*x9 + 2.6476e-01*x10 + 5.2057e-02*x11 + 5.2057e-02*x12 - 3.4504e-01*x13
+f_7(x) = -3.9287e-02 + 0.0000e+00*x1 + 0.0000e+00*x2 + 0.0000e+00*x3 + 0.0000e+00*x4 + 0.0000e+00*x5 + 0.0000e+00*x6 + 2.9083e-01*x7 + 6.5921e-01*x8 + 5.6403e-01*x9 + 1.7575e-01*x10 - 2.0096e-01*x11 - 2.0096e-01*x12 - 5.9333e-01*x13
+f_8(x) = -7.6745e-01 + 0.0000e+00*x1 + 0.0000e+00*x2 + 0.0000e+00*x3 + 0.0000e+00*x4 + 0.0000e+00*x5 + 0.0000e+00*x6 - 2.0294e-02*x7 + 2.9414e-01*x8 - 5.4079e-01*x9 + 5.7830e-01*x10 + 8.8361e-02*x11 + 8.8361e-02*x12 + 4.9562e-01*x13
+f_9(x) = -2.9606e+00 + 0.0000e+00*x1 + 0.0000e+00*x2 + 0.0000e+00*x3 + 0.0000e+00*x4 + 0.0000e+00*x5 + 0.0000e+00*x6 + 1.3083e-01*x7 - 3.7417e-02*x8 + 2.1253e-01*x9 + 6.9336e-01*x10 + 5.9766e-01*x11 + 5.9766e-01*x12 + 3.0129e-01*x13
+f_10(x) = 9.9185e-01 + 0.0000e+00*x1 + 0.0000e+00*x2 + 0.0000e+00*x3 + 0.0000e+00*x4 + 0.0000e+00*x5 + 0.0000e+00*x6 - 3.3122e-01*x7 + 9.8112e-02*x8 + 9.1262e-01*x9 - 1.2698e-01*x10 - 4.0033e-01*x11 - 4.0033e-01*x12 - 1.4818e-01*x13
+f_11(x) = 2.1013e+00 + 0.0000e+00*x1 + 0.0000e+00*x2 + 0.0000e+00*x3 + 0.0000e+00*x4 + 0.0000e+00*x5 + 0.0000e+00*x6 - 3.3983e-01*x7 + 3.8265e-02*x8 - 8.4112e-01*x9 + 4.3292e-01*x10 - 2.6624e-01*x11 - 2.6624e-01*x12 - 6.0989e-01*x13
