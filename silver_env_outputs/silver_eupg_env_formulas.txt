@@ -24,70 +24,70 @@ Discretization scheme: 3-bin quantile  (low / medium / high)
     (4.5820, 4.9258]  →  medium  (bin 1)
     (4.9258, +inf]  →  high  (bin 2)
 
-=== Decision Tree (trained on discretized features) ===
-Note: split thresholds are bin indices.  See 'Discretization Scheme' above for continuous value ranges.
-|--- feat_max_security_penalty <= 0.50
-|   |--- feat_mean_security_penalty <= 0.50
-|   |   |--- feat_max_network_penalty <= 0.50
-|   |   |   |--- feat_mean_network_penalty <= 0.50
+=== Decision Tree (thresholds shown as real feature values) ===
+|--- feat_max_security_penalty <= 4.5820
+|   |--- feat_mean_security_penalty <= 2.8003
+|   |   |--- feat_max_network_penalty <= 0.0558
+|   |   |   |--- feat_mean_network_penalty <= 0.0128
 |   |   |   |   |--- class: 5
-|   |   |   |--- feat_mean_network_penalty >  0.50
+|   |   |   |--- feat_mean_network_penalty >  0.0128
 |   |   |   |   |--- class: 8
-|   |   |--- feat_max_network_penalty >  0.50
-|   |   |   |--- feat_max_network_penalty <= 1.50
+|   |   |--- feat_max_network_penalty >  0.0558
+|   |   |   |--- feat_max_network_penalty <= 0.1914
 |   |   |   |   |--- class: 11
-|   |   |   |--- feat_max_network_penalty >  1.50
-|   |   |   |   |--- feat_mean_network_penalty <= 1.50
+|   |   |   |--- feat_max_network_penalty >  0.1914
+|   |   |   |   |--- feat_mean_network_penalty <= 0.0394
 |   |   |   |   |   |--- class: 1
-|   |   |   |   |--- feat_mean_network_penalty >  1.50
+|   |   |   |   |--- feat_mean_network_penalty >  0.0394
 |   |   |   |   |   |--- class: 7
-|   |--- feat_mean_security_penalty >  0.50
-|   |   |--- feat_max_network_penalty <= 1.00
-|   |   |   |--- feat_mean_network_penalty <= 0.50
+|   |--- feat_mean_security_penalty >  2.8003
+|   |   |--- feat_max_network_penalty <= 0.1914
+|   |   |   |--- feat_mean_network_penalty <= 0.0128
 |   |   |   |   |--- class: 4
-|   |   |   |--- feat_mean_network_penalty >  0.50
+|   |   |   |--- feat_mean_network_penalty >  0.0128
 |   |   |   |   |--- class: 1
-|   |   |--- feat_max_network_penalty >  1.00
+|   |   |--- feat_max_network_penalty >  0.1914
 |   |   |   |--- class: 8
-|--- feat_max_security_penalty >  0.50
-|   |--- feat_max_network_penalty <= 0.50
-|   |   |--- feat_mean_security_penalty <= 0.50
+|--- feat_max_security_penalty >  4.5820
+|   |--- feat_max_network_penalty <= 0.0558
+|   |   |--- feat_mean_security_penalty <= 2.8003
 |   |   |   |--- class: 0
-|   |   |--- feat_mean_security_penalty >  0.50
-|   |   |   |--- feat_mean_network_penalty <= 0.50
-|   |   |   |   |--- feat_mean_security_penalty <= 1.50
+|   |   |--- feat_mean_security_penalty >  2.8003
+|   |   |   |--- feat_mean_network_penalty <= 0.0128
+|   |   |   |   |--- feat_mean_security_penalty <= 2.8697
 |   |   |   |   |   |--- class: 6
-|   |   |   |   |--- feat_mean_security_penalty >  1.50
+|   |   |   |   |--- feat_mean_security_penalty >  2.8697
 |   |   |   |   |   |--- class: 3
-|   |   |   |--- feat_mean_network_penalty >  0.50
-|   |   |   |   |--- feat_mean_security_penalty <= 1.50
+|   |   |   |--- feat_mean_network_penalty >  0.0128
+|   |   |   |   |--- feat_mean_security_penalty <= 2.8697
 |   |   |   |   |   |--- class: 5
-|   |   |   |   |--- feat_mean_security_penalty >  1.50
+|   |   |   |   |--- feat_mean_security_penalty >  2.8697
 |   |   |   |   |   |--- class: 3
-|   |--- feat_max_network_penalty >  0.50
-|   |   |--- feat_mean_security_penalty <= 1.50
-|   |   |   |--- feat_mean_network_penalty <= 0.50
+|   |--- feat_max_network_penalty >  0.0558
+|   |   |--- feat_mean_security_penalty <= 2.8697
+|   |   |   |--- feat_mean_network_penalty <= 0.0128
 |   |   |   |   |--- class: 11
-|   |   |   |--- feat_mean_network_penalty >  0.50
-|   |   |   |   |--- feat_mean_network_penalty <= 1.50
+|   |   |   |--- feat_mean_network_penalty >  0.0128
+|   |   |   |   |--- feat_mean_network_penalty <= 0.0394
 |   |   |   |   |   |--- class: 0
-|   |   |   |   |--- feat_mean_network_penalty >  1.50
-|   |   |   |   |   |--- feat_max_network_penalty <= 1.50
+|   |   |   |   |--- feat_mean_network_penalty >  0.0394
+|   |   |   |   |   |--- feat_max_network_penalty <= 0.1914
 |   |   |   |   |   |   |--- class: 3
-|   |   |   |   |   |--- feat_max_network_penalty >  1.50
+|   |   |   |   |   |--- feat_max_network_penalty >  0.1914
 |   |   |   |   |   |   |--- class: 1
-|   |   |--- feat_mean_security_penalty >  1.50
-|   |   |   |--- feat_mean_network_penalty <= 0.50
+|   |   |--- feat_mean_security_penalty >  2.8697
+|   |   |   |--- feat_mean_network_penalty <= 0.0128
 |   |   |   |   |--- class: 1
-|   |   |   |--- feat_mean_network_penalty >  0.50
-|   |   |   |   |--- feat_mean_network_penalty <= 1.50
+|   |   |   |--- feat_mean_network_penalty >  0.0128
+|   |   |   |   |--- feat_mean_network_penalty <= 0.0394
 |   |   |   |   |   |--- class: 0
-|   |   |   |   |--- feat_mean_network_penalty >  1.50
+|   |   |   |   |--- feat_mean_network_penalty >  0.0394
 |   |   |   |   |   |--- class: 1
 
 
 === Linear Regression (trained on discretized features) ===
 f(x) = 6.7221e+00 - 8.2061e-02·x2 - 2.8696e-01·x3 + 7.4205e-01·x4 - 1.6855e+00·x5
+Round+clip training accuracy on boundary points: 10.61% (7/66 correct)
 
 === Logistic Regression (trained on discretized features) ===
 f_0(x) = 1.0173e-02 + 0.0000e+00*x1 + 1.3930e-01*x2 + 2.1019e-01*x3 - 5.5321e-01*x4 + 5.2072e-01*x5

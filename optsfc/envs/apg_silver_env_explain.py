@@ -88,34 +88,34 @@ warnings.filterwarnings("ignore")
 # Configuration — must match silver_env_explain.py / shap_explain_env_action.py
 # ─────────────────────────────────────────────────────────────────────────────
 
-# FEATURE_COLS = [
-#     "feat_mean_mtd_overhead",
-#     "feat_mean_network_penalty",
-#     "feat_max_network_penalty",
-#     "feat_mean_security_penalty",
-#     "feat_max_security_penalty",
-# ]
-
 FEATURE_COLS = [
-    # --- Security ---
-    "feat_max_apt_score",           # apt cvss/asp score 
-    "feat_mean_apt_score",
-    "feat_max_dataleak_score",      # data_leak cvss/asp score 
-    "feat_mean_dataleak_score",
-    "feat_max_dos_score",           # dos cvss/asp score 
-    "feat_mean_dos_score",
-
-    # --- Resource ---
-    "feat_vim0_cpu",               
-    "feat_vim0_ram",
-    "feat_vim1_cpu",
-    "feat_vim1_ram",
-    "feat_mean_remaining_mig",
-    "feat_mean_remaining_reinst",
-
-    # --- Network ---
-    "feat_total_ues",              
+    "feat_mean_mtd_overhead",
+    "feat_mean_network_penalty",
+    "feat_max_network_penalty",
+    "feat_mean_security_penalty",
+    "feat_max_security_penalty",
 ]
+
+# FEATURE_COLS = [
+#     # --- Security ---
+#     "feat_max_apt_score",           # apt cvss/asp score 
+#     "feat_mean_apt_score",
+#     "feat_max_dataleak_score",      # data_leak cvss/asp score 
+#     "feat_mean_dataleak_score",
+#     "feat_max_dos_score",           # dos cvss/asp score 
+#     "feat_mean_dos_score",
+
+#     # --- Resource ---
+#     "feat_vim0_cpu",               
+#     "feat_vim0_ram",
+#     "feat_vim1_cpu",
+#     "feat_vim1_ram",
+#     "feat_mean_remaining_mig",
+#     "feat_mean_remaining_reinst",
+
+#     # --- Network ---
+#     "feat_total_ues",              
+# ]
 
 N_ACTIONS = 12
 
@@ -593,9 +593,9 @@ def format_node_label(idx: int, leaf_id: int,
                  index thresholds back to continuous value intervals
     """
     header = [
-        f"b{idx} (leaf {leaf_id})",
-        f"SILVER a={stats['silver_class']}",
-        f"n={stats['n']}  match={stats['silver_match_rate']:.0%}",
+        f"b{idx} (leaf {leaf_id})  n={stats['n']}",
+        f"SILVER a={stats['silver_class']}  match={stats['silver_match_rate']:.0%}",
+        f"dominant exec a={stats['dominant_action']} (dominant purity={stats['dominant_purity']:.0%})",
     ]
     cond_lines = translate_conditions(conditions, bin_edges)
     return "\n".join(header + cond_lines)

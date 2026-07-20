@@ -2,11 +2,11 @@
 SILVER with RL-Guided Labeling (env_action variant)
 =====================================================
 Builds a global interpretable surrogate policy from the Shapley vectors
-(Φ_s) produced by shap_explain_env_action.py.
+(Φ_s) produced by shap_env_explain.py.
 
 Pipeline (paper-aligned, env_action variant)
 ---------------------------------------------
-Step 1  Load Φ_s and original state features X from shap_explain_env_action output
+Step 1  Load Φ_s and original state features X from shap_env_explain output
 Step 2  KMeans on Φ_s  →  cluster labels + centroids
 Step 3  Find boundary points in Φ_s space (one per cluster pair)
 Step 4  Inverse mapping: boundary Φ_s  →  original state X
@@ -38,6 +38,16 @@ realistic feature ranges rather than the narrow boundary subset.
 bin_edges is saved alongside the decision tree so the APG stage can apply
 the identical mapping to raw trajectory features before calling tree.apply().
 
+Display note (decision tree)
+-----------------------------
+The decision tree is TRAINED on discretized integer bins (0/1/2/...), so
+its raw split thresholds are bin-index cut points (e.g. 0.5, 1.5), not
+real feature values.  For human-readable output (the PDF plot and the
+"Decision Tree" section of formulas.txt), a display copy of the tree is
+built with _tree_with_real_thresholds(), which rewrites each split
+threshold back into the corresponding real value from bin_edges.  The
+pickled tree used for prediction / apply() is never touched by this.
+
 APG alignment guarantee
 ------------------------
 When assigning leaf nodes in the APG stage:
@@ -49,7 +59,7 @@ leaf-node membership is semantically consistent with the surrogate's training.
 Consistency guarantee
 ----------------------
 Φ_s files loaded here (shap_*_env.csv) were produced by
-shap_explain_env_action.py, which sliced the SHAP tensor at env_action.
+shap_env_explain.py, which sliced the SHAP tensor at env_action.
 The action labels in Step 5 are also read from env_action.
 Both therefore refer to the SAME executed action at every timestep.
 
@@ -60,7 +70,7 @@ Difference from silver_explain.py (argmax variant)
 - Output directory: silver_env_outputs/ by default
 - Output filenames: silver_<tag>_env_*.pkl / *.csv / *.txt
 
-Input files (from shap_explain_env_action.py output dir)
+Input files (from shap_env_explain.py output dir)
 ---------------------------------------------------------
     shap_env_outputs/shap_<tag>_env.csv   — Φ_s matrix, shape (N, n_features)
     No subdirectory structure; all files are flat under shap_env_outputs/.
@@ -90,6 +100,7 @@ Usage
 """
 
 import os
+import copy
 import pickle
 import warnings
 import argparse
@@ -106,37 +117,37 @@ from sklearn.tree import plot_tree
 warnings.filterwarnings("ignore")
 
 # ---------------------------------------------------------------------------
-# Constants — must match shap_explain_env_action.py
+# Constants — must match shap_env_explain.py
 # ---------------------------------------------------------------------------
 
-# FEATURE_COLS = [
-#     "feat_mean_mtd_overhead",
-#     "feat_mean_network_penalty",
-#     "feat_max_network_penalty",
-#     "feat_mean_security_penalty",
-#     "feat_max_security_penalty",
-# ]
-
 FEATURE_COLS = [
-    # --- Security ---
-    "feat_max_apt_score",           # apt cvss/asp score 
-    "feat_mean_apt_score",
-    "feat_max_dataleak_score",      # data_leak cvss/asp score 
-    "feat_mean_dataleak_score",
-    "feat_max_dos_score",           # dos cvss/asp score 
-    "feat_mean_dos_score",
-
-    # --- Resource ---
-    "feat_vim0_cpu",               
-    "feat_vim0_ram",
-    "feat_vim1_cpu",
-    "feat_vim1_ram",
-    "feat_mean_remaining_mig",
-    "feat_mean_remaining_reinst",
-
-    # --- Network ---
-    "feat_total_ues",              
+    "feat_mean_mtd_overhead",
+    "feat_mean_network_penalty",
+    "feat_max_network_penalty",
+    "feat_mean_security_penalty",
+    "feat_max_security_penalty",
 ]
+
+# FEATURE_COLS = [
+#     # --- Security ---
+#     "feat_max_apt_score",           # apt cvss/asp score 
+#     "feat_mean_apt_score",
+#     "feat_max_dataleak_score",      # data_leak cvss/asp score 
+#     "feat_mean_dataleak_score",
+#     "feat_max_dos_score",           # dos cvss/asp score 
+#     "feat_mean_dos_score",
+
+#     # --- Resource ---
+#     "feat_vim0_cpu",               
+#     "feat_vim0_ram",
+#     "feat_vim1_cpu",
+#     "feat_vim1_ram",
+#     "feat_mean_remaining_mig",
+#     "feat_mean_remaining_reinst",
+
+#     # --- Network ---
+#     "feat_total_ues",              
+# ]
 
 N_ACTIONS      = 12
 ENV_ACTION_COL = "env_action"
@@ -150,7 +161,11 @@ DEFAULT_N_BINS = 3
 # Length must equal DEFAULT_N_BINS (or the --n_bins argument).
 BIN_LABELS = ["low", "medium", "high"]
 
-# Φ_s files produced by shap_explain_env_action.py.
+# Number of decimal places used when rendering real-valued thresholds in
+# the tree plot (PDF) and in export_text() for formulas.txt.
+TREE_DISPLAY_PRECISION = 4
+
+# Φ_s files produced by shap_env_explain.py.
 # All files are flat under shap_dir/ (no subdirectories).
 # _env suffix distinguishes them from the argmax variant.
 SHAP_FILE = {
@@ -176,7 +191,7 @@ def _load_shap(algo: str, shap_dir: str) -> np.ndarray:
     """
     Load Φ_s matrix for algo from shap_dir (flat, no subdirectories).
 
-    Files were produced by shap_explain_env_action.py and named
+    Files were produced by shap_env_explain.py and named
     shap_*_env.csv.  The Φ_s in each file was sliced at env_action,
     matching the action labels produced by _get_action_labels below.
     """
@@ -185,7 +200,7 @@ def _load_shap(algo: str, shap_dir: str) -> np.ndarray:
     if not os.path.exists(p):
         raise FileNotFoundError(
             f"Missing SHAP file: {p}\n"
-            f"Expected shap_explain_env_action.py output at: {shap_dir}/"
+            f"Expected shap_env_explain.py output at: {shap_dir}/"
         )
     return pd.read_csv(p)[FEATURE_COLS].values.astype(np.float64)
 
@@ -196,7 +211,7 @@ def _get_action_labels(df: pd.DataFrame) -> np.ndarray:
 
     This is the action the agent actually executed in the environment.
     All five algorithms use the same column — no per-algo branching needed.
-    Mirrors the env_action slice used in shap_explain_env_action.py so
+    Mirrors the env_action slice used in shap_env_explain.py so
     Φ_s and the action label always refer to the same executed action.
 
     Raises
@@ -390,6 +405,50 @@ def _bin_edges_summary(bin_edges: dict, feature_names: list,
 
 
 # ---------------------------------------------------------------------------
+# Tree display helper: bin-index thresholds → real feature values
+# ---------------------------------------------------------------------------
+
+def _tree_with_real_thresholds(dt: DecisionTreeClassifier, feature_names: list,
+                               bin_edges: dict) -> DecisionTreeClassifier:
+    """
+    Return a DEEP COPY of dt whose internal split thresholds have been
+    rewritten from discretized bin-index space (e.g. 0.5, 1.5) into the
+    real continuous feature values recorded in bin_edges.
+
+    Why this mapping is correct
+    ----------------------------
+    dt was fit on integer bin indices (0=low, 1=medium, 2=high, ...).
+    At any internal node, sklearn picks a split threshold t such that
+    "go left if value <= t, go right if value > t".  Since the feature
+    values seen during training are always integers in [0, n_bins-1],
+    t always falls in the gap between two of them, so floor(t) identifies
+    exactly which bin edge the split corresponds to:
+        floor(t) = k   ⇔   split separates bin <= k from bin > k
+                        ⇔   real-world cutoff is bin_edges[feature][k]
+    This holds for the usual case (t = k + 0.5) and also for the edge
+    case where an intermediate bin is missing from the training subset
+    at that node (t can then land on an integer, but floor(t) still
+    gives the correct k).
+
+    This copy is for PLOTTING / TEXT EXPORT ONLY. Never use it for
+    prediction or apply() — its thresholds no longer live in the
+    discretized space the tree was actually trained on.
+    """
+    dt_display = copy.deepcopy(dt)
+    tree_ = dt_display.tree_
+    for node_id in range(tree_.node_count):
+        feat_idx = tree_.feature[node_id]
+        if feat_idx < 0:
+            continue  # leaf node, nothing to rewrite
+        feat_name = feature_names[feat_idx]
+        edges     = bin_edges[feat_name]           # shape (n_bins - 1,)
+        k         = int(np.floor(tree_.threshold[node_id]))
+        k         = max(0, min(k, len(edges) - 1))  # clamp defensively
+        tree_.threshold[node_id] = edges[k]
+    return dt_display
+
+
+# ---------------------------------------------------------------------------
 # Step 6: Surrogate models
 # ---------------------------------------------------------------------------
 
@@ -400,8 +459,8 @@ def _fit_decision_tree(bd_X: np.ndarray, bd_y: np.ndarray) -> DecisionTreeClassi
     The tree is trained without constraining max_depth so that it can
     fully capture the action boundaries in the discretized feature space.
     Because the input is already discretized (integer bins), split
-    thresholds in the rendered tree correspond directly to bin indices
-    (e.g. feat_mean_network_penalty <= 0 means bin 0 i.e. 'low').
+    thresholds are in bin-index space.  For display, use
+    _tree_with_real_thresholds() to convert them back to real values.
     """
     dt = DecisionTreeClassifier(random_state=0)
     dt.fit(bd_X, bd_y)
@@ -475,24 +534,33 @@ def _save_pkl(obj, path: str):
     print(f"  Saved → {path}")
 
 
-def _save_csv(arr: np.ndarray, columns: list, path: str):
-    pd.DataFrame(arr, columns=columns).to_csv(path, index=False)
+def _save_csv(df: pd.DataFrame, path: str):
+    """
+    Save an already-assembled DataFrame (feature/shap columns plus any
+    extra metadata columns such as ci/cj/action) to CSV.
+    """
+    df.to_csv(path, index=False)
     print(f"  Saved → {path}")
 
 
 def _save_tree_plot(dt: DecisionTreeClassifier, feature_names: list,
-                    class_names: list, title: str, path: str):
+                    class_names: list, title: str, path: str,
+                    bin_edges: dict):
     """
-    Render the decision tree to a PDF.
+    Render the decision tree to a PDF with REAL feature-value thresholds.
 
-    Because the tree was trained on discretized (integer bin) features,
-    split thresholds in the plot are bin indices.  The _bin_edges_summary
-    string saved in the formulas file provides the mapping back to
-    continuous value ranges, e.g. bin 0 → low → (−∞, 0.23].
+    dt was trained on discretized (bin-index) features, so its raw
+    thresholds are bin cut points, not real values.  Before plotting we
+    build a display-only copy via _tree_with_real_thresholds() that
+    rewrites every split threshold into the corresponding real value
+    from bin_edges, so the rendered tree is directly human-readable
+    without needing to cross-reference the discretization scheme.
     """
+    dt_plot = _tree_with_real_thresholds(dt, feature_names, bin_edges)
     fig, ax = plt.subplots(figsize=(max(20, len(class_names) * 4), 12))
-    plot_tree(dt, feature_names=feature_names, class_names=class_names,
-              filled=True, impurity=False, ax=ax)
+    plot_tree(dt_plot, feature_names=feature_names, class_names=class_names,
+              filled=True, impurity=False, ax=ax,
+              precision=TREE_DISPLAY_PRECISION)
     ax.set_title(title, fontsize=16)
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)
@@ -519,7 +587,7 @@ def run_silver_env(
     ----------
     algo        : one of DQN / Envelope / PPO / A2C / EUPG
     df          : original data DataFrame (must contain env_action column)
-    shap_dir    : directory containing shap_explain_env_action.py output CSVs
+    shap_dir    : directory containing shap_env_explain.py output CSVs
                   (flat structure, no subdirectories)
     output_dir  : where to write silver_*_env outputs
     n_clusters  : KMeans k  (default: N_ACTIONS = 12)
@@ -568,8 +636,9 @@ def run_silver_env(
     bd_shap_df["ci"]     = ci_col
     bd_shap_df["cj"]     = cj_col
     bd_shap_df["action"] = bd_y
-    bd_shap_df.to_csv(
-        os.path.join(output_dir, f"silver_{tag}_env_boundary_shap.csv"), index=False
+    _save_csv(
+        bd_shap_df,
+        os.path.join(output_dir, f"silver_{tag}_env_boundary_shap.csv"),
     )
 
     # continuous boundary state — saved for reference / debugging only;
@@ -578,8 +647,9 @@ def run_silver_env(
     bd_state_df["ci"]     = ci_col
     bd_state_df["cj"]     = cj_col
     bd_state_df["action"] = bd_y
-    bd_state_df.to_csv(
-        os.path.join(output_dir, f"silver_{tag}_env_boundary_state.csv"), index=False
+    _save_csv(
+        bd_state_df,
+        os.path.join(output_dir, f"silver_{tag}_env_boundary_state.csv"),
     )
     print(f"  Boundary datasets saved  (n={len(bd_y)}, "
           f"unique actions={sorted(set(bd_y.tolist()))})")
@@ -609,9 +679,9 @@ def run_silver_env(
     bd_disc_df["ci"]     = ci_col
     bd_disc_df["cj"]     = cj_col
     bd_disc_df["action"] = bd_y
-    bd_disc_df.to_csv(
+    _save_csv(
+        bd_disc_df,
         os.path.join(output_dir, f"silver_{tag}_env_boundary_state_discrete.csv"),
-        index=False,
     )
     print(f"  Discretized boundary state saved  "
           f"(shape={bd_state_discrete.shape})")
@@ -620,20 +690,32 @@ def run_silver_env(
     class_names = [str(a) for a in sorted(set(bd_y.tolist()))]
 
     # Decision Tree
-    # Split thresholds in the tree refer to bin indices (0=low, 1=medium,
-    # 2=high for n_bins=3).  Consult bin_edges for the corresponding
-    # continuous value intervals, which are written to the formulas file.
+    # Trained on bin indices; _save_tree_plot() converts thresholds to
+    # real feature values (via bin_edges) purely for the rendered PDF.
     dt = _fit_decision_tree(bd_state_discrete, bd_y)
     _save_pkl(dt, os.path.join(output_dir, f"silver_{tag}_env_decision_tree.pkl"))
     _save_tree_plot(
         dt, feature_names, class_names,
-        title=f"SILVER Decision Tree (env_action, {n_bins}-bin) — {algo}",
+        title=f"SILVER Decision Tree (env_action, real feature values) — {algo}",
         path=os.path.join(output_dir, f"silver_{tag}_env_decision_tree.pdf"),
+        bin_edges=bin_edges,
     )
 
     # Linear Regression (trained on discrete bins)
     lr = _fit_linear_regression(bd_state_discrete, bd_y)
     _save_pkl(lr, os.path.join(output_dir, f"silver_{tag}_env_linear_regression.pkl"))
+
+    # Sanity check: round+clip the continuous LR output on the training
+    # (boundary) data back into a valid action index and compare against
+    # the RL-guided labels bd_y.  This is the actual use of
+    # _round_and_clip(): it turns the "continuous approximation" LR was
+    # described as into a discrete action prediction, and we report how
+    # often that recovers the true env_action label.
+    lr_raw_preds    = lr.predict(bd_state_discrete)
+    lr_action_preds = _round_and_clip(lr_raw_preds)
+    lr_train_acc    = float(np.mean(lr_action_preds == bd_y))
+    print(f"  Linear Regression (round+clip) training accuracy: "
+          f"{lr_train_acc:.2%}  ({int(lr_train_acc * len(bd_y))}/{len(bd_y)})")
 
     # Logistic Regression (trained on discrete bins)
     if len(class_names) < 2:
@@ -656,15 +738,19 @@ def run_silver_env(
     formulas.append("=== Discretization Scheme ===")
     formulas.append(_bin_edges_summary(bin_edges, feature_names, n_bins, labels))
 
-    formulas.append("\n=== Decision Tree (trained on discretized features) ===")
+    formulas.append("\n=== Decision Tree (thresholds shown as real feature values) ===")
+    dt_display = _tree_with_real_thresholds(dt, feature_names, bin_edges)
     formulas.append(
-        "Note: split thresholds are bin indices.  "
-        "See 'Discretization Scheme' above for continuous value ranges."
+        export_text(dt_display, feature_names=feature_names,
+                    decimals=TREE_DISPLAY_PRECISION)
     )
-    formulas.append(export_text(dt, feature_names=feature_names))
 
     formulas.append("\n=== Linear Regression (trained on discretized features) ===")
     formulas.append(_linear_formula(lr, coeff_names, fname="f"))
+    formulas.append(
+        f"Round+clip training accuracy on boundary points: {lr_train_acc:.2%} "
+        f"({int(lr_train_acc * len(bd_y))}/{len(bd_y)} correct)"
+    )
 
     formulas.append("\n=== Logistic Regression (trained on discretized features) ===")
     if log_r is None:
@@ -688,6 +774,7 @@ def run_silver_env(
         "dt":                 dt,
         "lr":                 lr,
         "log_r":              log_r,
+        "lr_train_acc":       lr_train_acc,
         "bd_shap":            bd_shap,
         "bd_state":           bd_state,
         "bd_state_discrete":  bd_state_discrete,
@@ -730,7 +817,7 @@ if __name__ == "__main__":
     parser.add_argument("--input",      required=True,
                         help="Original data CSV (must contain env_action column)")
     parser.add_argument("--shap_dir",   required=True,
-                        help="Directory containing shap_explain_env_action.py output CSVs "
+                        help="Directory containing shap_env_explain.py output CSVs "
                              "(flat structure, no subdirectories)")
     parser.add_argument("--output",     default="silver_env_outputs",
                         help="Output directory for SILVER env_action results")

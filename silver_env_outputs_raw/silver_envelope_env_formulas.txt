@@ -56,88 +56,88 @@ Discretization scheme: 3-bin quantile  (low / medium / high)
     (7.0000, 22.0000]  →  medium  (bin 1)
     (22.0000, +inf]  →  high  (bin 2)
 
-=== Decision Tree (trained on discretized features) ===
-Note: split thresholds are bin indices.  See 'Discretization Scheme' above for continuous value ranges.
-|--- feat_mean_remaining_mig <= 1.50
-|   |--- feat_mean_remaining_reinst <= 0.50
-|   |   |--- feat_vim0_cpu <= 1.50
-|   |   |   |--- feat_vim1_ram <= 1.50
-|   |   |   |   |--- feat_vim1_ram <= 0.50
-|   |   |   |   |   |--- feat_vim0_ram <= 0.50
+=== Decision Tree (thresholds shown as real feature values) ===
+|--- feat_mean_remaining_mig <= 142.8095
+|   |--- feat_mean_remaining_reinst <= 855.9047
+|   |   |--- feat_vim0_cpu <= 22.0000
+|   |   |   |--- feat_vim1_ram <= 105.7500
+|   |   |   |   |--- feat_vim1_ram <= 98.2500
+|   |   |   |   |   |--- feat_vim0_ram <= 184.5000
 |   |   |   |   |   |   |--- class: 2
-|   |   |   |   |   |--- feat_vim0_ram >  0.50
-|   |   |   |   |   |   |--- feat_vim0_ram <= 1.50
+|   |   |   |   |   |--- feat_vim0_ram >  184.5000
+|   |   |   |   |   |   |--- feat_vim0_ram <= 190.6250
 |   |   |   |   |   |   |   |--- class: 4
-|   |   |   |   |   |   |--- feat_vim0_ram >  1.50
+|   |   |   |   |   |   |--- feat_vim0_ram >  190.6250
 |   |   |   |   |   |   |   |--- class: 7
-|   |   |   |   |--- feat_vim1_ram >  0.50
+|   |   |   |   |--- feat_vim1_ram >  98.2500
 |   |   |   |   |   |--- class: 7
-|   |   |   |--- feat_vim1_ram >  1.50
+|   |   |   |--- feat_vim1_ram >  105.7500
 |   |   |   |   |--- class: 4
-|   |   |--- feat_vim0_cpu >  1.50
+|   |   |--- feat_vim0_cpu >  22.0000
 |   |   |   |--- class: 6
-|   |--- feat_mean_remaining_reinst >  0.50
-|   |   |--- feat_vim0_cpu <= 1.50
-|   |   |   |--- feat_vim0_ram <= 0.50
-|   |   |   |   |--- feat_vim1_ram <= 1.50
+|   |--- feat_mean_remaining_reinst >  855.9047
+|   |   |--- feat_vim0_cpu <= 22.0000
+|   |   |   |--- feat_vim0_ram <= 184.5000
+|   |   |   |   |--- feat_vim1_ram <= 105.7500
 |   |   |   |   |   |--- class: 3
-|   |   |   |   |--- feat_vim1_ram >  1.50
-|   |   |   |   |   |--- feat_total_ues <= 0.50
+|   |   |   |   |--- feat_vim1_ram >  105.7500
+|   |   |   |   |   |--- feat_total_ues <= 7.0000
 |   |   |   |   |   |   |--- class: 3
-|   |   |   |   |   |--- feat_total_ues >  0.50
-|   |   |   |   |   |   |--- feat_vim1_cpu <= 1.50
+|   |   |   |   |   |--- feat_total_ues >  7.0000
+|   |   |   |   |   |   |--- feat_vim1_cpu <= 22.0000
 |   |   |   |   |   |   |   |--- class: 3
-|   |   |   |   |   |   |--- feat_vim1_cpu >  1.50
+|   |   |   |   |   |   |--- feat_vim1_cpu >  22.0000
 |   |   |   |   |   |   |   |--- class: 1
-|   |   |   |--- feat_vim0_ram >  0.50
-|   |   |   |   |--- feat_vim1_ram <= 0.50
-|   |   |   |   |   |--- feat_vim0_ram <= 1.50
+|   |   |   |--- feat_vim0_ram >  184.5000
+|   |   |   |   |--- feat_vim1_ram <= 98.2500
+|   |   |   |   |   |--- feat_vim0_ram <= 190.6250
 |   |   |   |   |   |   |--- class: 3
-|   |   |   |   |   |--- feat_vim0_ram >  1.50
+|   |   |   |   |   |--- feat_vim0_ram >  190.6250
 |   |   |   |   |   |   |--- class: 1
-|   |   |   |   |--- feat_vim1_ram >  0.50
-|   |   |   |   |   |--- feat_vim1_cpu <= 0.50
-|   |   |   |   |   |   |--- feat_vim0_ram <= 1.50
+|   |   |   |   |--- feat_vim1_ram >  98.2500
+|   |   |   |   |   |--- feat_vim1_cpu <= 18.0000
+|   |   |   |   |   |   |--- feat_vim0_ram <= 190.6250
 |   |   |   |   |   |   |   |--- class: 3
-|   |   |   |   |   |   |--- feat_vim0_ram >  1.50
+|   |   |   |   |   |   |--- feat_vim0_ram >  190.6250
 |   |   |   |   |   |   |   |--- class: 4
-|   |   |   |   |   |--- feat_vim1_cpu >  0.50
+|   |   |   |   |   |--- feat_vim1_cpu >  18.0000
 |   |   |   |   |   |   |--- class: 4
-|   |   |--- feat_vim0_cpu >  1.50
+|   |   |--- feat_vim0_cpu >  22.0000
 |   |   |   |--- class: 7
-|--- feat_mean_remaining_mig >  1.50
-|   |--- feat_total_ues <= 1.50
-|   |   |--- feat_vim0_cpu <= 0.50
+|--- feat_mean_remaining_mig >  142.8095
+|   |--- feat_total_ues <= 22.0000
+|   |   |--- feat_vim0_cpu <= 18.0000
 |   |   |   |--- class: 11
-|   |   |--- feat_vim0_cpu >  0.50
-|   |   |   |--- feat_vim0_cpu <= 1.50
+|   |   |--- feat_vim0_cpu >  18.0000
+|   |   |   |--- feat_vim0_cpu <= 22.0000
 |   |   |   |   |--- class: 6
-|   |   |   |--- feat_vim0_cpu >  1.50
+|   |   |   |--- feat_vim0_cpu >  22.0000
 |   |   |   |   |--- class: 11
-|   |--- feat_total_ues >  1.50
-|   |   |--- feat_vim1_ram <= 1.50
-|   |   |   |--- feat_vim1_cpu <= 0.50
-|   |   |   |   |--- feat_vim0_cpu <= 1.50
-|   |   |   |   |   |--- feat_vim0_ram <= 1.50
+|   |--- feat_total_ues >  22.0000
+|   |   |--- feat_vim1_ram <= 105.7500
+|   |   |   |--- feat_vim1_cpu <= 18.0000
+|   |   |   |   |--- feat_vim0_cpu <= 22.0000
+|   |   |   |   |   |--- feat_vim0_ram <= 190.6250
 |   |   |   |   |   |   |--- class: 5
-|   |   |   |   |   |--- feat_vim0_ram >  1.50
+|   |   |   |   |   |--- feat_vim0_ram >  190.6250
 |   |   |   |   |   |   |--- class: 3
-|   |   |   |   |--- feat_vim0_cpu >  1.50
-|   |   |   |   |   |--- feat_vim1_ram <= 0.50
+|   |   |   |   |--- feat_vim0_cpu >  22.0000
+|   |   |   |   |   |--- feat_vim1_ram <= 98.2500
 |   |   |   |   |   |   |--- class: 6
-|   |   |   |   |   |--- feat_vim1_ram >  0.50
+|   |   |   |   |   |--- feat_vim1_ram >  98.2500
 |   |   |   |   |   |   |--- class: 4
-|   |   |   |--- feat_vim1_cpu >  0.50
+|   |   |   |--- feat_vim1_cpu >  18.0000
 |   |   |   |   |--- class: 6
-|   |   |--- feat_vim1_ram >  1.50
-|   |   |   |--- feat_vim1_cpu <= 1.50
+|   |   |--- feat_vim1_ram >  105.7500
+|   |   |   |--- feat_vim1_cpu <= 22.0000
 |   |   |   |   |--- class: 5
-|   |   |   |--- feat_vim1_cpu >  1.50
+|   |   |   |--- feat_vim1_cpu >  22.0000
 |   |   |   |   |--- class: 5
 
 
 === Linear Regression (trained on discretized features) ===
 f(x) = 4.7631e+00 - 1.1102e-16·x2 + 4.4409e-16·x3 + 6.1062e-16·x5 - 4.9960e-16·x6 + 4.9387e-01·x7 - 4.7983e-01·x8 + 2.2033e-01·x9 - 4.9121e-01·x10 + 1.2611e+00·x11 + 1.2611e+00·x12 - 1.7132e+00·x13
+Round+clip training accuracy on boundary points: 13.64% (9/66 correct)
 
 === Logistic Regression (trained on discretized features) ===
 f_0(x) = -3.1305e+00 + 0.0000e+00*x1 + 0.0000e+00*x2 + 0.0000e+00*x3 + 0.0000e+00*x4 + 0.0000e+00*x5 + 0.0000e+00*x6 - 1.9650e-01*x7 - 2.1631e-01*x8 + 4.9734e-01*x9 + 2.5027e-01*x10 + 2.2281e-01*x11 + 2.2281e-01*x12 + 2.9713e-01*x13
