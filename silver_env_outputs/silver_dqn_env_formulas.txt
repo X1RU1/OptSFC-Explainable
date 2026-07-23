@@ -108,6 +108,23 @@ Decision Tree:        46.97% (31/66)
 Actions present: 12/12
 Tree leaves: 20, depth: 6
 Action distribution (action: count): {0: 4, 1: 5, 2: 9, 3: 2, 4: 1, 5: 11, 6: 5, 7: 8, 8: 10, 9: 3, 10: 1, 11: 7}
+
+=== Full-Trajectory Fidelity ===
+The decision tree above was trained on 66 boundary points only. Evaluated against all 5000 states in this algorithm's full trajectory, using the same bin_edges and the same discretize() call APG relies on:
+Full-trajectory fidelity: 13.72% (686/5000)
+Per-action breakdown (executed action: count, correct, rate):
+  action 0: count=64, correct=10, rate=15.62%
+  action 1: count=378, correct=0, rate=0.00%
+  action 2: count=119, correct=18, rate=15.13%
+  action 3: count=591, correct=65, rate=11.00%
+  action 4: count=492, correct=179, rate=36.38%
+  action 5: count=735, correct=132, rate=17.96%
+  action 6: count=139, correct=21, rate=15.11%
+  action 7: count=660, correct=94, rate=14.24%
+  action 8: count=1055, correct=146, rate=13.84%
+  action 9: count=281, correct=0, rate=0.00%
+  action 10: count=219, correct=0, rate=0.00%
+  action 11: count=267, correct=21, rate=7.87%
 Logistic Regression:  31.82% (21/66)
 Linear Regression:    13.64% (9/66)
 

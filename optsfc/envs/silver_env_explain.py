@@ -121,34 +121,34 @@ warnings.filterwarnings("ignore")
 # Constants — must match shap_env_explain.py
 # ---------------------------------------------------------------------------
 
-FEATURE_COLS = [
-    "feat_mean_mtd_overhead",
-    "feat_mean_network_penalty",
-    "feat_max_network_penalty",
-    "feat_mean_security_penalty",
-    "feat_max_security_penalty",
-]
-
 # FEATURE_COLS = [
-#     # --- Security ---
-#     "feat_max_apt_score",           # apt cvss/asp score 
-#     "feat_mean_apt_score",
-#     "feat_max_dataleak_score",      # data_leak cvss/asp score 
-#     "feat_mean_dataleak_score",
-#     "feat_max_dos_score",           # dos cvss/asp score 
-#     "feat_mean_dos_score",
-
-#     # --- Resource ---
-#     "feat_vim0_cpu",               
-#     "feat_vim0_ram",
-#     "feat_vim1_cpu",
-#     "feat_vim1_ram",
-#     "feat_mean_remaining_mig",
-#     "feat_mean_remaining_reinst",
-
-#     # --- Network ---
-#     "feat_total_ues",              
+#     "feat_mean_mtd_overhead",
+#     "feat_mean_network_penalty",
+#     "feat_max_network_penalty",
+#     "feat_mean_security_penalty",
+#     "feat_max_security_penalty",
 # ]
+
+FEATURE_COLS = [
+    # --- Security ---
+    "feat_max_apt_score",           # apt cvss/asp score 
+    "feat_mean_apt_score",
+    "feat_max_dataleak_score",      # data_leak cvss/asp score 
+    "feat_mean_dataleak_score",
+    "feat_max_dos_score",           # dos cvss/asp score 
+    "feat_mean_dos_score",
+
+    # --- Resource ---
+    "feat_vim0_cpu",               
+    "feat_vim0_ram",
+    "feat_vim1_cpu",
+    "feat_vim1_ram",
+    "feat_mean_remaining_mig",
+    "feat_mean_remaining_reinst",
+
+    # --- Network ---
+    "feat_total_ues",              
+]
 
 N_ACTIONS      = 12
 ENV_ACTION_COL = "env_action"
@@ -580,6 +580,70 @@ def _compute_surrogate_diagnostics(
     }
 
 
+def _compute_full_trajectory_fidelity(
+    X: np.ndarray,
+    action_labels: np.ndarray,
+    bin_edges: dict,
+    feature_names: list,
+    dt: DecisionTreeClassifier,
+) -> dict:
+    """
+    Evaluate the fitted decision tree against the FULL trajectory, not just
+    the 66 boundary points it was trained on.
+
+    This reuses the exact same discretize() call and bin_edges that the APG
+    stage (Section~\\ref{sec:apg}) uses, so the number computed here is
+    guaranteed to match what dt.apply()/dt.predict() would give APG if it
+    computed an aggregate fidelity score. It answers a different question
+    than boundary accuracy: not "how well does the tree separate the
+    hardest, most ambiguous states" but "how well does this tree, taken as
+    a stand-in for the whole policy, reproduce the agent's actual behavior
+    across the run it was drawn from".
+
+    Parameters
+    ----------
+    X             : (N, n_features) continuous feature matrix, the FULL
+                    trajectory (same array passed to compute_bin_edges())
+    action_labels : (N,) real executed actions for the full trajectory
+                    (same array produced by _get_action_labels())
+    bin_edges     : dict from compute_bin_edges(), already fit on this X
+    feature_names : list of feature name strings matching X columns
+    dt            : fitted DecisionTreeClassifier (trained on the 66
+                    discretized boundary points, unrelated to X here)
+
+    Returns
+    -------
+    dict with fidelity_acc, fidelity_correct, n_total, and a per-class
+    breakdown (dict: action -> {count, correct, rate}) for closer
+    inspection of which actions the tree explains well or poorly.
+    """
+    X_discrete_full = discretize(X, bin_edges, feature_names)
+    preds_full = dt.predict(X_discrete_full)
+
+    correct_mask = (preds_full == action_labels)
+    n_total = len(action_labels)
+    n_correct = int(correct_mask.sum())
+    fidelity_acc = n_correct / n_total
+
+    per_class = {}
+    for a in sorted(set(action_labels.tolist())):
+        mask = (action_labels == a)
+        n_a = int(mask.sum())
+        correct_a = int(correct_mask[mask].sum())
+        per_class[int(a)] = {
+            "count": n_a,
+            "correct": correct_a,
+            "rate": correct_a / n_a if n_a > 0 else None,
+        }
+
+    return {
+        "fidelity_acc": fidelity_acc,
+        "fidelity_correct": n_correct,
+        "n_total": n_total,
+        "per_class": per_class,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Step 7: Formula strings
 # ---------------------------------------------------------------------------
@@ -837,6 +901,20 @@ def run_silver_env(
     print(f"  Distinct discretized feature combinations: {diag['n_combos']}")
     print(f"  Combinations with >1 distinct action: {diag['n_collisions']}")
     print(f"  Points in colliding combinations: {diag['n_collision_pts']}/{diag['n_total']}")
+    print(f"  Actions present: {diag['n_actions_present']}/{diag['n_actions_possible']}")
+    print(f"  Tree leaves: {diag['n_leaves']}, depth: {diag['tree_depth']}")
+    print(f"  Action distribution: {diag['action_distribution']}")
+
+    # ── Full-trajectory fidelity ────────────────────────────────────────
+    # Same tree, same bin_edges, but evaluated on all N trajectory states
+    # instead of just the 66 boundary points. This is the number that
+    # answers "how faithful is this tree to the real policy", as opposed
+    # to "how well does it separate the hardest boundary cases".
+    fidelity = _compute_full_trajectory_fidelity(
+        X, action_labels, bin_edges, feature_names, dt
+    )
+    print(f"  Full-trajectory fidelity: {fidelity['fidelity_acc']:.2%} "
+          f"({fidelity['fidelity_correct']}/{fidelity['n_total']})")
 
     # ── Step 7: formula strings ───────────────────────────────────────────
     # Feature variable names for formula text; x1…x5 map to FEATURE_COLS.
@@ -888,6 +966,26 @@ def run_silver_env(
     formulas.append(
         f"Action distribution (action: count): {diag['action_distribution']}"
     )
+    formulas.append("\n=== Full-Trajectory Fidelity ===")
+    formulas.append(
+        f"The decision tree above was trained on 66 boundary points only. "
+        f"Evaluated against all {fidelity['n_total']} states in this "
+        f"algorithm's full trajectory, using the same bin_edges and the "
+        f"same discretize() call APG relies on:"
+    )
+    formulas.append(
+        f"Full-trajectory fidelity: {fidelity['fidelity_acc']:.2%} "
+        f"({fidelity['fidelity_correct']}/{fidelity['n_total']})"
+    )
+    formulas.append("Per-action breakdown (executed action: count, correct, rate):")
+    for a, stats in sorted(fidelity['per_class'].items()):
+        rate_str = f"{stats['rate']:.2%}" if stats['rate'] is not None else "n/a"
+        formulas.append(
+            f"  action {a}: count={stats['count']}, "
+            f"correct={stats['correct']}, rate={rate_str}"
+        )
+
+
     if diag['log_acc'] is not None:
         formulas.append(
             f"Logistic Regression:  {diag['log_acc']:.2%} "
@@ -932,6 +1030,7 @@ def run_silver_env(
         "log_r":              log_r,
         "lr_train_acc":       lr_train_acc,
         "diagnostics":        diag,
+        "full_trajectory_fidelity": fidelity,
         "bd_shap":            bd_shap,
         "bd_state":           bd_state,
         "bd_state_discrete":  bd_state_discrete,
