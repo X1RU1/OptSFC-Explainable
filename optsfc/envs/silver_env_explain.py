@@ -104,6 +104,7 @@ import copy
 import pickle
 import warnings
 import argparse
+from collections import Counter
 
 import numpy as np
 import pandas as pd
@@ -488,6 +489,98 @@ def _round_and_clip(predictions: np.ndarray, min_val: int = 0, max_val: int = No
 
 
 # ---------------------------------------------------------------------------
+# Diagnostics: training accuracy for all surrogate models, on the same
+# discretized boundary dataset they were fit on. This replaces the separate
+# compute_silver_tree_accuracy.py script, so the numbers are guaranteed to
+# come from the exact same dt / log_r objects used to produce the tree plot
+# and the pickled models -- no risk of a stale or mismatched re-fit.
+# ---------------------------------------------------------------------------
+
+def _compute_surrogate_diagnostics(
+    bd_X_discrete: np.ndarray,
+    bd_y: np.ndarray,
+    dt: DecisionTreeClassifier,
+    log_r,
+    n_actions_possible: int = N_ACTIONS,
+) -> dict:
+    """
+    Compute training-set accuracy for the decision tree and logistic
+    regression, plus the theoretical ceiling any classifier could reach
+    using only this discretized feature set (majority vote within each
+    unique feature combination).
+
+    If dt accuracy equals the ceiling, the tree is not underfitting; it has
+    already extracted everything this feature set can offer.
+
+    Parameters
+    ----------
+    bd_X_discrete : discretized boundary features, same array passed to
+                    dt.fit() / log_r.fit()
+    bd_y          : action labels, same array passed to dt.fit() / log_r.fit()
+    dt            : fitted DecisionTreeClassifier
+    log_r         : fitted LogisticRegression, or None if skipped
+
+    Returns
+    -------
+    dict with dt_acc, dt_correct, log_acc, log_correct, upper_bound_acc,
+    upper_bound_correct, n_combos, n_collisions, n_collision_pts, n_total
+    """
+    n = len(bd_y)
+
+    dt_preds = dt.predict(bd_X_discrete)
+    dt_correct = int((dt_preds == bd_y).sum())
+    dt_acc = dt_correct / n
+
+    if log_r is not None:
+        log_preds = log_r.predict(bd_X_discrete)
+        log_correct = int((log_preds == bd_y).sum())
+        log_acc = log_correct / n
+    else:
+        log_correct = None
+        log_acc = None
+
+    # Upper bound: group boundary points by their unique discretized feature
+    # combination, and take the majority action within each group. Summing
+    # the majority counts gives the best any classifier restricted to this
+    # feature set could do, since no rule can separate points that share an
+    # identical discretized signature but carry different action labels.
+    n_features = bd_X_discrete.shape[1]
+    combo_df = pd.DataFrame(bd_X_discrete, columns=[f"f{i}" for i in range(n_features)])
+    combo_df["__action__"] = bd_y
+
+    best_correct = 0
+    n_collisions = 0
+    n_collision_pts = 0
+    grouped = combo_df.groupby([f"f{i}" for i in range(n_features)])["__action__"]
+    n_combos = grouped.ngroups
+    for _, sub in grouped:
+        counts = Counter(sub)
+        best_correct += counts.most_common(1)[0][1]
+        if len(counts) > 1:
+            n_collisions += 1
+            n_collision_pts += len(sub)
+    upper_bound_acc = best_correct / n
+
+    n_actions_present = int(len(np.unique(bd_y)))
+    n_leaves = int(dt.get_n_leaves())
+    tree_depth = int(dt.get_depth())
+    action_distribution = {a: int((bd_y == a).sum()) for a in range(n_actions_possible)}
+
+    return {
+        "dt_acc": dt_acc, "dt_correct": dt_correct,
+        "log_acc": log_acc, "log_correct": log_correct,
+        "upper_bound_acc": upper_bound_acc, "upper_bound_correct": best_correct,
+        "n_combos": n_combos, "n_collisions": n_collisions,
+        "n_collision_pts": n_collision_pts, "n_total": n,
+        "n_actions_present": n_actions_present,
+        "n_actions_possible": n_actions_possible,
+        "n_leaves": n_leaves,
+        "tree_depth": tree_depth,
+        "action_distribution": action_distribution,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Step 7: Formula strings
 # ---------------------------------------------------------------------------
 
@@ -726,6 +819,25 @@ def run_silver_env(
         log_r = _fit_logistic_regression(bd_state_discrete, bd_y)
         _save_pkl(log_r, os.path.join(output_dir, f"silver_{tag}_env_logistic_regression.pkl"))
 
+    # ── Diagnostics: training accuracy for decision tree and logistic ──────
+    # regression, plus the theoretical ceiling given this feature set. This
+    # runs on the exact bd_state_discrete / bd_y and dt / log_r objects
+    # already used above, so it can never drift out of sync with the saved
+    # tree plot or pickled models.
+    diag = _compute_surrogate_diagnostics(bd_state_discrete, bd_y, dt, log_r, N_ACTIONS)
+    print(f"  Decision Tree accuracy: {diag['dt_acc']:.2%} "
+          f"({diag['dt_correct']}/{diag['n_total']})")
+    if diag['log_acc'] is not None:
+        print(f"  Logistic Regression accuracy: {diag['log_acc']:.2%} "
+              f"({diag['log_correct']}/{diag['n_total']})")
+    print(f"  Upper bound given this feature set: {diag['upper_bound_acc']:.2%} "
+          f"({diag['upper_bound_correct']}/{diag['n_total']})")
+    if abs(diag['upper_bound_acc'] - diag['dt_acc']) < 1e-9:
+        print("    -> Decision tree already reaches this ceiling; not underfitting.")
+    print(f"  Distinct discretized feature combinations: {diag['n_combos']}")
+    print(f"  Combinations with >1 distinct action: {diag['n_collisions']}")
+    print(f"  Points in colliding combinations: {diag['n_collision_pts']}/{diag['n_total']}")
+
     # ── Step 7: formula strings ───────────────────────────────────────────
     # Feature variable names for formula text; x1…x5 map to FEATURE_COLS.
     coeff_names = [f"x{i+1}" for i in range(len(feature_names))]
@@ -761,6 +873,50 @@ def run_silver_env(
         )
     else:
         formulas.append(_logistic_formulas(log_r, coeff_names, class_names, fname="f"))
+    
+    formulas.append("\n=== Surrogate Model Accuracy (training set, boundary points) ===")
+    formulas.append(
+        f"Decision Tree:        {diag['dt_acc']:.2%} "
+        f"({diag['dt_correct']}/{diag['n_total']})"
+    )
+    formulas.append(
+        f"Actions present: {diag['n_actions_present']}/{diag['n_actions_possible']}"
+    )
+    formulas.append(
+        f"Tree leaves: {diag['n_leaves']}, depth: {diag['tree_depth']}"
+    )
+    formulas.append(
+        f"Action distribution (action: count): {diag['action_distribution']}"
+    )
+    if diag['log_acc'] is not None:
+        formulas.append(
+            f"Logistic Regression:  {diag['log_acc']:.2%} "
+            f"({diag['log_correct']}/{diag['n_total']})"
+        )
+    else:
+        formulas.append("Logistic Regression:  skipped (single action class)")
+    formulas.append(
+        f"Linear Regression:    {lr_train_acc:.2%} "
+        f"({int(lr_train_acc * len(bd_y))}/{len(bd_y)})"
+    )
+    formulas.append(
+        f"\nUpper bound given this feature set (majority vote per unique "
+        f"discretized combination): {diag['upper_bound_acc']:.2%} "
+        f"({diag['upper_bound_correct']}/{diag['n_total']})"
+    )
+    if abs(diag['upper_bound_acc'] - diag['dt_acc']) < 1e-9:
+        formulas.append(
+            "The decision tree already reaches this ceiling, so it is not "
+            "underfitting: no classifier using only these discretized "
+            "features could do better on this boundary dataset."
+        )
+    formulas.append(
+        f"Distinct discretized feature combinations: {diag['n_combos']}"
+    )
+    formulas.append(
+        f"Combinations mapping to more than one action: {diag['n_collisions']} "
+        f"({diag['n_collision_pts']}/{diag['n_total']} points affected)"
+    )
 
     formula_path = os.path.join(output_dir, f"silver_{tag}_env_formulas.txt")
     with open(formula_path, "w", encoding="utf-8") as fh:
@@ -775,6 +931,7 @@ def run_silver_env(
         "lr":                 lr,
         "log_r":              log_r,
         "lr_train_acc":       lr_train_acc,
+        "diagnostics":        diag,
         "bd_shap":            bd_shap,
         "bd_state":           bd_state,
         "bd_state_discrete":  bd_state_discrete,

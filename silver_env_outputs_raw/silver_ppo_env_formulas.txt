@@ -197,3 +197,16 @@ f_8(x) = -4.8644e-02 + 0.0000e+00*x1 + 0.0000e+00*x2 + 0.0000e+00*x3 + 0.0000e+0
 f_9(x) = 2.0505e+00 + 0.0000e+00*x1 + 0.0000e+00*x2 + 0.0000e+00*x3 + 0.0000e+00*x4 + 0.0000e+00*x5 + 0.0000e+00*x6 - 1.9597e-01*x7 - 5.1260e-01*x8 - 3.0506e-01*x9 - 4.1245e-01*x10 + 1.2732e-03*x11 + 1.2732e-03*x12 - 3.0140e-01*x13
 f_10(x) = -9.1677e-01 + 0.0000e+00*x1 + 0.0000e+00*x2 + 0.0000e+00*x3 + 0.0000e+00*x4 + 0.0000e+00*x5 + 0.0000e+00*x6 + 5.4502e-01*x7 + 2.3192e-01*x8 + 1.4034e-01*x9 - 2.0804e-01*x10 + 1.5247e-01*x11 + 1.5247e-01*x12 - 1.3135e-02*x13
 f_11(x) = -2.9292e-01 + 0.0000e+00*x1 + 0.0000e+00*x2 + 0.0000e+00*x3 + 0.0000e+00*x4 + 0.0000e+00*x5 + 0.0000e+00*x6 + 2.5335e-01*x7 + 4.6825e-02*x8 - 8.3507e-02*x9 + 4.3109e-03*x10 - 7.4823e-02*x11 - 7.4823e-02*x12 - 4.1299e-02*x13
+
+=== Surrogate Model Accuracy (training set, boundary points) ===
+Decision Tree:        65.15% (43/66)
+Actions present: 12/12
+Tree leaves: 41, depth: 8
+Action distribution (action: count): {0: 3, 1: 5, 2: 6, 3: 3, 4: 9, 5: 5, 6: 7, 7: 5, 8: 8, 9: 7, 10: 5, 11: 3}
+Logistic Regression:  30.30% (20/66)
+Linear Regression:    18.18% (12/66)
+
+Upper bound given this feature set (majority vote per unique discretized combination): 65.15% (43/66)
+The decision tree already reaches this ceiling, so it is not underfitting: no classifier using only these discretized features could do better on this boundary dataset.
+Distinct discretized feature combinations: 42
+Combinations mapping to more than one action: 16 (40/66 points affected)
