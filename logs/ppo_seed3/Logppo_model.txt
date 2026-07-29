@@ -1,0 +1,47 @@
+Logging to ./tmp/ppo_model/PPO_4
+-----------------------------
+| time/              |      |
+|    fps             | 128  |
+|    iterations      | 1    |
+|    time_elapsed    | 15   |
+|    total_timesteps | 2048 |
+-----------------------------
+-----------------------------------------
+| time/                   |             |
+|    fps                  | 119         |
+|    iterations           | 2           |
+|    time_elapsed         | 34          |
+|    total_timesteps      | 4096        |
+| train/                  |             |
+|    approx_kl            | 0.015163314 |
+|    clip_fraction        | 0.0689      |
+|    clip_range           | 0.2         |
+|    entropy_loss         | -2.48       |
+|    explained_variance   | -0.00178    |
+|    learning_rate        | 0.0003      |
+|    loss                 | 1.39e+04    |
+|    n_updates            | 10          |
+|    policy_gradient_loss | -0.00736    |
+|    value_loss           | 3.02e+04    |
+-----------------------------------------
+-----------------------------------------
+| reward/                 |             |
+|    mean_reward          | -13.1       |
+|    return               | -6.56e+04   |
+| time/                   |             |
+|    fps                  | 95          |
+|    iterations           | 3           |
+|    time_elapsed         | 64          |
+|    total_timesteps      | 6144        |
+| train/                  |             |
+|    approx_kl            | 0.013621472 |
+|    clip_fraction        | 0.163       |
+|    clip_range           | 0.2         |
+|    entropy_loss         | -2.47       |
+|    explained_variance   | -3.54e-05   |
+|    learning_rate        | 0.0003      |
+|    loss                 | 2.84e+04    |
+|    n_updates            | 20          |
+|    policy_gradient_loss | -0.0184     |
+|    value_loss           | 5.72e+04    |
+-----------------------------------------

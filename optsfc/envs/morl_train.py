@@ -11,10 +11,15 @@ import matplotlib.pyplot as plt
 #local files
 from .mo_fiveg_mdp import MOfiveG_net
 from .short_simulated_testbed import impact_ssla_factors, is_action_possible
+from optsfc.envs.ppo.critic import PPOQNet, PPOQTrainer
 
 # SB3
-from stable_baselines3 import A2C, PPO
+from stable_baselines3 import A2C, PPO, DQN
 from sb3_contrib import MaskablePPO
+from stable_baselines3.common.vec_env import VecCheckNan, DummyVecEnv
+from stable_baselines3.common.results_plotter import load_results, ts2xy
+from stable_baselines3.common.monitor import Monitor
+from stable_baselines3.common.callbacks import BaseCallback
 
 # MORL-BASELINES
 from morl_baselines.multi_policy.pareto_q_learning.pql import PQL
@@ -27,6 +32,19 @@ import torch as th
 
 rewards_coeff = [0.4, 0.3, 0.3]
 division_factor = 30
+
+
+def set_global_seed(seed: int, deterministic_cudnn: bool = False):
+    """Call once at the start of every training or evaluation run."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+        if deterministic_cudnn:
+            torch.backends.cudnn.deterministic = True
+            torch.backends.cudnn.benchmark = False
+
 
 # def scalarization(reward: np.ndarray, weights: np.ndarray = None) -> float:
 #     if reward.ndim == 1 and reward.size == 3:
@@ -408,27 +426,32 @@ def train_pql():
     assert np.all(tracked == target)
 
 
-def train_Envelope(total_timesteps, model_name, budget_reset="episodic", gamma=0.99, lr=3e-4, epsilon=0.01, batch_size=256, net_arch=[256, 256, 256, 256]):
+def train_Envelope(total_timesteps, model_name, budget_reset="episodic",
+                    gamma=0.99, lr=3e-4, epsilon=0.01, batch_size=256,
+                    net_arch=[256, 256, 256, 256], seed=0):
+    set_global_seed(seed)
+
+    save_root = f"./trained_models/{model_name}_seed{seed}/"
+    os.makedirs(save_root, exist_ok=True)
+
     env = MOfiveG_net("MlpPolicy", budget_reset)
+    env.action_space.seed(seed)
+    env.reset(seed=seed)
 
-    save_replay_buffer = True
-    filename = model_name
-    save_dir = "models"
+    agent = Envelope(env, learning_rate=lr, gamma=gamma,
+                      initial_epsilon=epsilon, final_epsilon=epsilon,
+                      batch_size=batch_size, net_arch=net_arch,
+                      log=False, seed=seed)
 
-    # Train the agent
-    agent = Envelope(env, learning_rate=lr, gamma=gamma, initial_epsilon=epsilon, final_epsilon=epsilon, batch_size=batch_size, net_arch=net_arch, log = False)
-    
     env.model_for_explain = agent
+    agent.train(total_timesteps=total_timesteps, eval_freq=1000)
 
-    agent.train(total_timesteps= total_timesteps, eval_freq=1000)
-    agent.save(save_dir=save_dir, filename=filename, save_replay_buffer= save_replay_buffer)
+    # save_replay_buffer=False: the buffer is only needed to resume training,
+    # not for evaluation, and pickling the (pre-allocated, oversized) buffer
+    # causes a MemoryError on machines without large RAM.
+    agent.save(save_dir=save_root, filename="policy", save_replay_buffer=False)
 
-    if env.explain_log:
-        import pandas as pd
-        df_log = pd.DataFrame(env.explain_log)
-        match_rate = df_log["match"].mean() * 100
-        print(f"Match rate: {match_rate:.1f}%")
-        print(f"   Matched: {df_log['match'].sum()} / {len(df_log)}")
+    env.save_explanations(save_root + "train_explain.csv")
     return env
 
 
@@ -448,34 +471,35 @@ def split_train_Envelope(total_timesteps, timesteps_split, model_name, budget_re
         agent.save(save_dir=save_dir, filename=filename, save_replay_buffer=save_replay_buffer)
 
 
-def train_eupg(total_timesteps, model_name, budget_reset="episodic"):
-    env = MOfiveG_net("MlpPolicy", budget_reset)
+def train_eupg(total_timesteps, model_name, budget_reset="episodic", seed=0):
+    set_global_seed(seed)
+
+    save_root = f"./trained_models/{model_name}_seed{seed}/"
+    os.makedirs(save_root, exist_ok=True)
+
+    env      = MOfiveG_net("MlpPolicy", budget_reset)
     eval_env = MOfiveG_net("MlpPolicy", budget_reset)
+    env.action_space.seed(seed)
+    env.reset(seed=seed)
 
-    save_dir = "models"
-    filename = model_name
-    # convert rewards_coeff list into np.array
     weights = np.array(rewards_coeff)
+    agent = EUPG(env, scalarization=scalarization, weights=weights,
+                 gamma=0.99, log=False, learning_rate=0.001, seed=seed)
 
-    agent = EUPG(env, scalarization=scalarization, weights=weights, gamma=0.99, log=False, learning_rate=0.001)
-
-    obs_dim  = env.observation_space.shape[0]
-    q_net    = DecomposedQNet(obs_dim=obs_dim, n_actions=env.n_actions)
-    trainer  = DecomposedQTrainer(q_net, weights=rewards_coeff, lr=3e-4)
+    obs_dim = env.observation_space.shape[0]
+    q_net   = DecomposedQNet(obs_dim=obs_dim, n_actions=env.n_actions)
+    trainer = DecomposedQTrainer(q_net, weights=rewards_coeff, lr=3e-4)
     agent.decomposed_q_net = q_net
 
     env.model_for_explain = agent
-    env.critic_trainer = trainer
+    env.critic_trainer    = trainer
 
     agent.train(total_timesteps=total_timesteps, eval_env=eval_env)
-    eupg_model_save(agent, save_dir, filename)
 
-    if env.explain_log:
-        import pandas as pd
-        df_log     = pd.DataFrame(env.explain_log)
-        match_rate = df_log["match"].mean() * 100
-        print(f"Explanation match rate: {match_rate:.1f}%")
-        print(f"   Matched: {df_log['match'].sum()} / {len(df_log)}")
+    eupg_model_save(agent, save_root, "policy", save_replay_buffer=False)
+    torch.save(q_net.state_dict(), save_root + "aux_qnet.pt")
+
+    env.save_explanations(save_root + "train_explain.csv")
     return env
 
 
@@ -603,3 +627,140 @@ def transfer_learning(total_timesteps, agent_type, policy, model_name, previous_
 
     if agent_type in ["A2C", "PPO", "MaskablePPO"]:
         agent.learn(total_timesteps=total_timesteps, callback=None, seed=None, reset_num_timesteps=False, tensorboard_log="./tmp/"+model_name+"/" )
+
+
+def _make_eval_env(budget_reset, eval_seed, non_MORL=True):
+    env = MOfiveG_net("MlpPolicy", budget_reset=budget_reset, non_MORL=non_MORL)
+    env.action_space.seed(eval_seed)
+    env.reset(seed=eval_seed)
+    return env
+
+
+def eval_dqn(model_name, seed, eval_steps=5000, budget_reset="episodic"):
+    eval_seed = seed + 10000
+    set_global_seed(eval_seed)
+    save_root = f"./trained_models/{model_name}_seed{seed}/"
+
+    env = _make_eval_env(budget_reset, eval_seed)
+    model = DQN.load(save_root + "policy.zip", env=env)
+    env.model_for_explain = model   # native q_net, no separate aux net needed
+
+    obs, _ = env.reset()
+    for _ in range(eval_steps):
+        action, _ = model.predict(obs, deterministic=True)
+        obs, reward, done, truncated, info = env.step(action)
+        if done or truncated:
+            obs, _ = env.reset()
+
+    env.save_explanations(save_root + "eval_explain.csv")
+    return env
+
+
+def eval_ppo(model_name, seed, eval_steps=5000, budget_reset="episodic"):
+    eval_seed = seed + 10000
+    set_global_seed(eval_seed)
+    save_root = f"./trained_models/{model_name}_seed{seed}/"
+
+    env = _make_eval_env(budget_reset, eval_seed)
+    model = PPO.load(save_root + "policy.zip", env=env)
+
+    obs_dim = env.observation_space.shape[0]
+    aux_q_net = PPOQNet(obs_dim=obs_dim, n_actions=env.n_actions)
+    aux_q_net.load_state_dict(torch.load(save_root + "aux_qnet.pt", weights_only=True))
+    aux_q_net.eval()
+    model.ppo_q_net = aux_q_net   # frozen: no critic_trainer attached during eval
+
+    env.model_for_explain = model
+
+    obs, _ = env.reset()
+    for _ in range(eval_steps):
+        action, _ = model.predict(obs, deterministic=False)
+        obs, reward, done, truncated, info = env.step(action)
+        if done or truncated:
+            obs, _ = env.reset()
+
+    env.save_explanations(save_root + "eval_explain.csv")
+    return env
+
+
+def eval_a2c(model_name, seed, eval_steps=5000, budget_reset="episodic"):
+    eval_seed = seed + 10000
+    set_global_seed(eval_seed)
+    save_root = f"./trained_models/{model_name}_seed{seed}/"
+
+    env = _make_eval_env(budget_reset, eval_seed)
+    model = A2C.load(save_root + "policy.zip", env=env)
+
+    obs_dim = env.observation_space.shape[0]
+    aux_q_net = PPOQNet(obs_dim=obs_dim, n_actions=env.n_actions)
+    aux_q_net.load_state_dict(torch.load(save_root + "aux_qnet.pt", weights_only=True))
+    aux_q_net.eval()
+    model.a2c_q_net = aux_q_net
+
+    env.model_for_explain = model
+
+    obs, _ = env.reset()
+    for _ in range(eval_steps):
+        action, _ = model.predict(obs, deterministic=True)
+        obs, reward, done, truncated, info = env.step(action)
+        if done or truncated:
+            obs, _ = env.reset()
+
+    env.save_explanations(save_root + "eval_explain.csv")
+    return env
+
+
+def eval_envelope(model_name, seed, eval_steps=5000, budget_reset="episodic"):
+    eval_seed = seed + 10000
+    set_global_seed(eval_seed)
+    save_root = f"./trained_models/{model_name}_seed{seed}/"
+
+    env = _make_eval_env(budget_reset, eval_seed, non_MORL=False)
+    agent = Envelope(env, log=False)
+    agent.load(path=save_root + "policy.tar", load_replay_buffer=False)
+    agent.experiment_name = "Envelope"
+
+    env.model_for_explain = agent
+
+    obs, _ = env.reset()
+    for _ in range(eval_steps):
+        action = agent.eval(obs, rewards_coeff)
+        obs, reward, done, truncated, info = env.step(action)
+        if done or truncated:
+            obs, _ = env.reset()
+
+    env.save_explanations(save_root + "eval_explain.csv")
+    return env
+
+
+def eval_eupg(model_name, seed, eval_steps=5000, budget_reset="episodic"):
+    eval_seed = seed + 10000
+    set_global_seed(eval_seed)
+    save_root = f"./trained_models/{model_name}_seed{seed}/"
+
+    env = _make_eval_env(budget_reset, eval_seed, non_MORL=False)
+    weights = np.array(rewards_coeff)
+    agent = EUPG(env, scalarization=scalarization, weights=weights, log=False)
+    eupg_model_load(path=save_root + "policy.tar", model=agent)
+
+    obs_dim = env.observation_space.shape[0]
+    q_net = DecomposedQNet(obs_dim=obs_dim, n_actions=env.n_actions)
+    q_net.load_state_dict(torch.load(save_root + "aux_qnet.pt"))
+    q_net.eval()
+    agent.decomposed_q_net = q_net
+    agent.experiment_name = "EUPG"
+
+    env.model_for_explain = agent
+
+    accrued = np.zeros(env.reward_space.shape[0], dtype=np.float32)
+    obs, _ = env.reset()
+    for _ in range(eval_steps):
+        action = agent.eval(obs, accrued)
+        obs, reward, done, truncated, info = env.step(action)
+        accrued += np.array(reward, dtype=np.float32)
+        if done or truncated:
+            accrued[:] = 0.0
+            obs, _ = env.reset()
+
+    env.save_explanations(save_root + "eval_explain.csv")
+    return env

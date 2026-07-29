@@ -1,6 +1,6 @@
 """OptSFC: Optimal Service Function Chaining Environment and Training Framework."""
 
-from .envs.mo_fiveg_mdp import MOfiveG_net, SaveOnBestTrainingRewardCallback
+from .envs.mo_fiveg_mdp import MOfiveG_net, SaveOnBestTrainingRewardCallback, train
 from .envs.morl_train import (
     train_eupg, 
     train_Envelope, 
@@ -9,7 +9,8 @@ from .envs.morl_train import (
     eupg_model_load,
     eval_mo_reward_conditioned,
     rewards_coeff,
-    scalarization
+    scalarization,
+    eval_dqn, eval_ppo, eval_a2c, eval_envelope, eval_eupg
 )
 from .envs.short_simulated_testbed import is_action_possible, impact_ssla_factors
 
@@ -18,6 +19,7 @@ __version__ = "0.1.0"
 __all__ = [
     "MOfiveG_net",
     "SaveOnBestTrainingRewardCallback", 
+    "train",
     "train_eupg",
     "train_Envelope",
     "eval_agent",
@@ -28,4 +30,9 @@ __all__ = [
     "scalarization",
     "is_action_possible",
     "impact_ssla_factors",
+    "eval_dqn",
+    "eval_ppo",
+    "eval_a2c",
+    "eval_envelope",
+    "eval_eupg"
 ]

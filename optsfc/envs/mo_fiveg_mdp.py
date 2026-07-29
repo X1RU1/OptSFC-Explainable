@@ -8,6 +8,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import time
 import pandas as pd
+import random
 # GYM
 import gymnasium as gym
 from gym.spaces import Dict
@@ -45,6 +46,18 @@ from morl_baselines.multi_policy.envelope.envelope import Envelope
 from optsfc.envs.eupg.eupg_explain import EUPG
 
 rewards_coeff = [0.4, 0.3, 0.3]
+
+
+def set_global_seed(seed: int, deterministic_cudnn: bool = False):
+    """Call once at the start of every training or evaluation run."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+        if deterministic_cudnn:
+            torch.backends.cudnn.deterministic = True
+            torch.backends.cudnn.benchmark = False
 
 
 def scalarization(reward: np.ndarray, weights=None) -> float:
@@ -635,118 +648,79 @@ class SaveOnBestTrainingRewardCallback(BaseCallback):
 # ── Scalar algorithm training ─────────────────────────────────────────────────
 
 def train(agent_type, policy, total_timesteps, model_name,
-          log_dir, budget_reset="episodic"):
+          log_dir, budget_reset="episodic", seed=0,
+          dqn_learning_starts=1000):
     """
-    Train a single-objective RL agent (DQN, A2C, PPO, DDPG, SAC, TD3, or
-    MaskablePPO) with the RDX explainability hook enabled.
+    Modified: adds explicit seeding and persists the auxiliary Q-network
+    (PPOQNet / a2c_q_net) alongside the SB3 policy, since model.save()
+    does not serialize dynamically attached attributes.
+    """
+    set_global_seed(seed)
 
-    The explanation log is written to <log_dir>/<model_name>_explain.csv after
-    training completes.
-    """
+    save_root = f"./trained_models/{model_name}_seed{seed}/"
+    os.makedirs(save_root, exist_ok=True)
     os.makedirs(log_dir, exist_ok=True)
+
     env_train = Monitor(
         MOfiveG_net(policy, budget_reset=budget_reset, non_MORL=True), log_dir
     )
-    env_train.action_space.seed(123)
+    env_train.action_space.seed(seed)
+    env_train.env.reset(seed=seed)   # first seeded reset; RNG carries on afterward
 
     callback = SaveOnBestTrainingRewardCallback(
         check_freq=5000, log_dir=log_dir,
         model_name=model_name, policy=policy, env=env_train,
     )
 
-    print(f"Start training the {agent_type} agent")
+    print(f"Start training the {agent_type} agent (seed={seed})")
     if agent_type == "DQN":
-        model = DQN(policy, env_train, verbose=1,
+        model = DQN(policy, env_train, verbose=1, seed=seed,
+                    learning_starts=dqn_learning_starts,
                     tensorboard_log=f"./tmp/{model_name}/")
     elif agent_type == "A2C":
-        model = A2C(policy, env_train, verbose=1,
+        model = A2C(policy, env_train, verbose=1, seed=seed,
                     tensorboard_log=f"./tmp/{model_name}/")
     elif agent_type == "PPO":
-        model = PPO(policy, env_train, verbose=1,
+        model = PPO(policy, env_train, verbose=1, seed=seed,
                     tensorboard_log=f"./tmp/{model_name}/")
-    elif agent_type == "DDPG":
-        model = DDPG(policy, env_train, verbose=1,
-                     tensorboard_log=f"./tmp/{model_name}/")
-    elif agent_type == "SAC":
-        model = SAC(policy, env_train, verbose=1,
-                    tensorboard_log=f"./tmp/{model_name}/")
-    elif agent_type == "TD3":
-        model = TD3(policy, env_train, verbose=1,
-                    tensorboard_log=f"./tmp/{model_name}/")
-    else:   # MaskablePPO
-        model = MaskablePPO(policy, env_train, verbose=1,
-                            tensorboard_log=f"./tmp/{model_name}/")
+    else:
+        raise ValueError(f"Unsupported agent_type for this eval pipeline: {agent_type}")
 
     env_train.env.model_for_explain = model
-
     obs_dim = env_train.env.observation_space.shape[0]
 
+    aux_q_net = None
     if agent_type == "PPO":
-        ppo_q         = PPOQNet(obs_dim=obs_dim, n_actions=env_train.env.n_actions)
-        ppo_q_trainer = PPOQTrainer(ppo_q, gamma=0.99)
-        model.ppo_q_net              = ppo_q
-        env_train.env.critic_trainer = ppo_q_trainer
-
+        aux_q_net     = PPOQNet(obs_dim=obs_dim, n_actions=env_train.env.n_actions)
+        aux_q_trainer = PPOQTrainer(aux_q_net, gamma=0.99)
+        model.ppo_q_net               = aux_q_net
+        env_train.env.critic_trainer  = aux_q_trainer
     elif agent_type == "A2C":
-        a2c_q         = PPOQNet(obs_dim=obs_dim, n_actions=env_train.env.n_actions)
-        a2c_q_trainer = PPOQTrainer(a2c_q, gamma=0.99)
-        model.a2c_q_net              = a2c_q
-        env_train.env.critic_trainer = a2c_q_trainer
+        aux_q_net     = PPOQNet(obs_dim=obs_dim, n_actions=env_train.env.n_actions)
+        aux_q_trainer = PPOQTrainer(aux_q_net, gamma=0.99)
+        model.a2c_q_net               = aux_q_net
+        env_train.env.critic_trainer  = aux_q_trainer
 
     with open(log_dir + "Log" + model_name + ".txt", "a") as f:
         with contextlib.redirect_stdout(f):
             model.learn(total_timesteps, callback=callback)
 
-    plot_results(log_dir, f"OptSFC {agent_type} Learning Curve").savefig(
-        log_dir + "plot_" + model_name + ".pdf"
-    )
-    model.save(log_dir + model_name + "last")
+    # ── Persist policy + auxiliary Q-net under the unified path ──────────────
+    model.save(save_root + "policy")
+    if aux_q_net is not None:
+        torch.save(aux_q_net.state_dict(), save_root + "aux_qnet.pt")
+
+    env_train.env.save_explanations(save_root + "train_explain.csv")
 
     if env_train.env.explain_log:
         df_log     = pd.DataFrame(env_train.env.explain_log)
         match_rate = df_log["match"].mean() * 100
-        print(f"Explanation match rate: {match_rate:.1f}%")
-        print(f"   Matched: {df_log['match'].sum()} / {len(df_log)}")
+        print(f"Training-time explanation match rate: {match_rate:.1f}%")
 
     actual_env = env_train.env
     del model
     gc.collect()
     return actual_env
-
-
-# ── MORL training helpers ─────────────────────────────────────────────────────
-
-def train_eupg(total_timesteps, model_name, budget_reset="episodic"):
-    """
-    Train an EUPG agent with the DecomposedQNet RDX explainability hook.
-
-    The explanation log is written to <model_name>_explain.csv after training.
-    """
-    env      = MOfiveG_net("MlpPolicy", budget_reset)
-    eval_env = MOfiveG_net("MlpPolicy", budget_reset)
-    save_dir = "models"
-
-    weights = np.array(rewards_coeff)
-    agent   = EUPG(env, scalarization=scalarization, weights=weights,
-                   gamma=0.99, log=False, learning_rate=0.001)
-
-    obs_dim = env.observation_space.shape[0]
-    q_net   = DecomposedQNet(obs_dim=obs_dim, n_actions=env.n_actions)
-    trainer = DecomposedQTrainer(q_net, weights=rewards_coeff, lr=3e-4)
-
-    agent.decomposed_q_net  = q_net
-    env.model_for_explain   = agent
-    env.critic_trainer      = trainer
-
-    agent.train(total_timesteps=total_timesteps, eval_env=eval_env)
-
-    if env.explain_log:
-        df_log     = pd.DataFrame(env.explain_log)
-        match_rate = df_log["match"].mean() * 100
-        print(f"Explanation match rate: {match_rate:.1f}%")
-        print(f"   Matched: {df_log['match'].sum()} / {len(df_log)}")
-
-    return env
 
 
 # ── Plotting helpers ──────────────────────────────────────────────────────────
