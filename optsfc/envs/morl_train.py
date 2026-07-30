@@ -701,7 +701,7 @@ def eval_a2c(model_name, seed, eval_steps=5000, budget_reset="episodic"):
 
     obs, _ = env.reset()
     for _ in range(eval_steps):
-        action, _ = model.predict(obs, deterministic=True)
+        action, _ = model.predict(obs, deterministic=False)
         obs, reward, done, truncated, info = env.step(action)
         if done or truncated:
             obs, _ = env.reset()
