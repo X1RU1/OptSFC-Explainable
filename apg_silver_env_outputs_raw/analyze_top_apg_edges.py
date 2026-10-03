@@ -6,9 +6,9 @@ from pathlib import Path
 # Configuration
 # ============================================================
 
-INPUT_FILE = "apg_silver_env_outputs_raw\silver_apg_envelope_env_assignments.csv"
+INPUT_FILE = "apg_silver_env_outputs_raw\seed\silver_apg_eupg_env_assignments.csv"
 
-TOP_K = 10
+TOP_K = 20
 
 # Ranking criterion:
 # "probability" -> APG transition probability P(source -> target)

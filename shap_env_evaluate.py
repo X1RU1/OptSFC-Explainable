@@ -35,13 +35,14 @@ Envelope-only diagnostic plots (6, 7):
 
 Usage
 -----
-  python shap_env_evaluate.py --data_root ./shap_env_outputs --out_dir ./shap_env_figures
-  python shap_env_evaluate.py --data_root ./shap_env_outputs --out_dir ./shap_env_figures --plot 4,6,11
+  python shap_env_evaluate.py --data_root ./shap_env_outputs/seed --out_dir ./shap_env_evaluation/seed
+  python shap_env_evaluate.py --data_root ./shap_env_outputs/seed --out_dir ./shap_env_evaluation/seed --plot 4,6,11
 """
 
 import os
 import argparse
 import warnings
+import shap
 
 import numpy as np
 import pandas as pd
@@ -76,64 +77,64 @@ OBJ_COLORS = {
 }
 ALGOS = ["dqn", "envelope", "eupg", "ppo", "a2c"]
 
-# FEATURE_COLS = [
-#     "feat_mean_mtd_overhead",
-#     "feat_mean_network_penalty",
-#     "feat_max_network_penalty",
-#     "feat_mean_security_penalty",
-#     "feat_max_security_penalty",
-# ]
-# SHORT_NAMES = {
-#     "feat_mean_mtd_overhead":       "MTD\nOverhead",
-#     "feat_mean_network_penalty":    "Net Penalty\n(mean)",
-#     "feat_max_network_penalty":     "Net Penalty\n(max)",
-#     "feat_mean_security_penalty":   "Sec Penalty\n(mean)",
-#     "feat_max_security_penalty":    "Sec Penalty\n(max)",
-# }
-
 FEATURE_COLS = [
-    # --- Security ---
-    "feat_max_apt_score",           # apt cvss/asp score 
-    "feat_mean_apt_score",
-    "feat_max_dataleak_score",      # data_leak cvss/asp score 
-    "feat_mean_dataleak_score",
-    "feat_max_dos_score",           # dos cvss/asp score 
-    "feat_mean_dos_score",
-
-    # --- Resource ---
-    "feat_vim0_cpu",               
-    "feat_vim0_ram",
-    "feat_vim1_cpu",
-    "feat_vim1_ram",
-    "feat_mean_remaining_mig",
-    "feat_mean_remaining_reinst",
-
-    # --- Network ---
-    "feat_total_ues",              
+    "feat_mean_mtd_overhead",
+    "feat_mean_network_penalty",
+    "feat_max_network_penalty",
+    "feat_mean_security_penalty",
+    "feat_max_security_penalty",
 ]
-
 SHORT_NAMES = {
-    # --- Security ---
-    "feat_max_apt_score":            "APT\n(max)",
-    "feat_mean_apt_score":           "APT\n(mean)",
-    "feat_max_dataleak_score":       "Data Leak\n(max)",
-    "feat_mean_dataleak_score":      "Data Leak\n(mean)",
-    "feat_max_dos_score":            "DoS\n(max)",
-    "feat_mean_dos_score":           "DoS\n(mean)",
-
-    # --- Resource ---
-    "feat_vim0_cpu":                 "VIM0 CPU",
-    "feat_vim0_ram":                 "VIM0 RAM",
-    "feat_vim1_cpu":                 "VIM1 CPU",
-    "feat_vim1_ram":                 "VIM1 RAM",
-    "feat_min_remaining_mig":        "Migrate Budget\n(min)",
-    "feat_min_remaining_reinst":     "Restart Budget\n(min)",
-    "feat_mean_remaining_mig":       "Migrate Budget\n(mean)",
-    "feat_mean_remaining_reinst":    "Restart Budget\n(mean)",
-
-    # --- Network ---
-    "feat_total_ues":                "Total UEs",
+    "feat_mean_mtd_overhead":       "MTD\nOverhead",
+    "feat_mean_network_penalty":    "Net Penalty\n(mean)",
+    "feat_max_network_penalty":     "Net Penalty\n(max)",
+    "feat_mean_security_penalty":   "Sec Penalty\n(mean)",
+    "feat_max_security_penalty":    "Sec Penalty\n(max)",
 }
+
+# FEATURE_COLS = [
+#     # --- Security ---
+#     "feat_max_apt_score",           # apt cvss/asp score 
+#     "feat_mean_apt_score",
+#     "feat_max_dataleak_score",      # data_leak cvss/asp score 
+#     "feat_mean_dataleak_score",
+#     "feat_max_dos_score",           # dos cvss/asp score 
+#     "feat_mean_dos_score",
+
+#     # --- Resource ---
+#     "feat_vim0_cpu",               
+#     "feat_vim0_ram",
+#     "feat_vim1_cpu",
+#     "feat_vim1_ram",
+#     "feat_mean_remaining_mig",
+#     "feat_mean_remaining_reinst",
+
+#     # --- Network ---
+#     "feat_total_ues",              
+# ]
+
+# SHORT_NAMES = {
+#     # --- Security ---
+#     "feat_max_apt_score":            "APT\n(max)",
+#     "feat_mean_apt_score":           "APT\n(mean)",
+#     "feat_max_dataleak_score":       "Data Leak\n(max)",
+#     "feat_mean_dataleak_score":      "Data Leak\n(mean)",
+#     "feat_max_dos_score":            "DoS\n(max)",
+#     "feat_mean_dos_score":           "DoS\n(mean)",
+
+#     # --- Resource ---
+#     "feat_vim0_cpu":                 "VIM0 CPU",
+#     "feat_vim0_ram":                 "VIM0 RAM",
+#     "feat_vim1_cpu":                 "VIM1 CPU",
+#     "feat_vim1_ram":                 "VIM1 RAM",
+#     "feat_min_remaining_mig":        "Migrate Budget\n(min)",
+#     "feat_min_remaining_reinst":     "Restart Budget\n(min)",
+#     "feat_mean_remaining_mig":       "Migrate Budget\n(mean)",
+#     "feat_mean_remaining_reinst":    "Restart Budget\n(mean)",
+
+#     # --- Network ---
+#     "feat_total_ues":                "Total UEs",
+# }
 
 ENVELOPE_OBJECTIVES = ["resource", "network", "security"]
 
@@ -531,21 +532,102 @@ class SHAPVisualizerEnv:
 
         self._save(fig, "11_env_dashboard_summary.png")
 
+
+    # ══════════════════════════════════════════════════════════════════════
+    # 12. Per-algo SHAP beeswarm (classic summary plot, needs raw feature values)
+    # ══════════════════════════════════════════════════════════════════════
+    ALGO_NAME_MAP = {
+        "dqn": "DQN", "envelope": "Envelope", "eupg": "EUPG",
+        "ppo": "PPO", "a2c": "A2C",
+    }
+
+    def plot_beeswarm(self, raw_data_csv: str, top_k: int | None = None,
+                       algos: list | None = None):
+        """
+        Classic per-feature SHAP beeswarm, one PNG per algorithm.
+
+        Unlike the other plots, this needs the *raw* per-timestep feature
+        values (not just Φ_s), because point colour = feature value.
+        `raw_data_csv` should be the same combined CSV passed as --input to
+        shap_env_explain.py (it must contain an 'algo' column plus all
+        FEATURE_COLS).
+        """
+        print("\n[12] env_action SHAP — beeswarm (per-algo)")
+
+        if not os.path.exists(raw_data_csv):
+            print(f"  [SKIP] raw_data_csv not found: {raw_data_csv}")
+            return
+        raw_df = pd.read_csv(raw_data_csv)
+        if "algo" not in raw_df.columns:
+            print("  [SKIP] raw_data_csv has no 'algo' column")
+            return
+
+        target_algos = algos or ALGOS
+        k = top_k or len(FEATURE_COLS)
+
+        for algo in target_algos:
+            summary_fname = ALGO_SUMMARY_FILE.get(algo)
+            if summary_fname is None:
+                continue
+            raw_shap_fname = summary_fname.replace("_summary.csv", ".csv")
+            shap_df = self._load(raw_shap_fname)
+            if shap_df is None:
+                continue
+
+            algo_key = self.ALGO_NAME_MAP[algo]
+            algo_raw = raw_df[raw_df["algo"] == algo_key].reset_index(drop=True)
+            missing = [c for c in FEATURE_COLS if c not in algo_raw.columns]
+            if missing:
+                print(f"  [SKIP] {algo}: raw CSV missing columns {missing}")
+                continue
+            if algo_raw.empty:
+                print(f"  [SKIP] {algo}: no rows with algo == '{algo_key}' in raw CSV")
+                continue
+
+            n = min(len(shap_df), len(algo_raw))
+            if len(shap_df) != len(algo_raw):
+                print(f"  [WARN] {algo}: row count mismatch "
+                      f"(shap={len(shap_df)}, raw={len(algo_raw)}) — truncating to {n}")
+
+            shap_vals = shap_df[FEATURE_COLS].values[:n]
+            X_raw     = algo_raw[FEATURE_COLS].values[:n]
+
+            # rank by mean |SHAP|, keep top_k
+            order = np.argsort(-np.abs(shap_vals).mean(axis=0))[:k]
+            feat_names = [
+                SHORT_NAMES.get(FEATURE_COLS[i], FEATURE_COLS[i]).replace("\n", " ")
+                for i in order
+            ]
+
+            plt.figure()
+            shap.summary_plot(
+                shap_vals[:, order], X_raw[:, order],
+                feature_names=feat_names,
+                show=False,
+            )
+            fig = plt.gcf()
+            fig.suptitle(f"{algo.upper()} — SHAP Summary (env_action)",
+                         fontsize=12, y=1.02)
+            self._save(fig, f"12_env_beeswarm_{algo}.png")
+
+
     # ══════════════════════════════════════════════════════════════════════
     # Entry point
     # ══════════════════════════════════════════════════════════════════════
-    def run_all(self):
+    def run_all(self, raw_data: str | None = None):
         print(f"\n{'='*60}")
         print(f"  SHAP Visualization (env_action) — data root: {self.root}")
         print(f"  Output dir: {self.out_dir}")
         print(f"{'='*60}")
-        self.plot_custom_signed_bars()           # 4
-        self.plot_custom_radar()                 # 5
-        self.plot_envelope_objective_influence() # 6
-        self.plot_envelope_per_objective()       # 7
-        self.plot_rank_correlation()             # 8
-        self.plot_importance_divergence()        # 9
-        self.plot_dashboard_summary()            # 11
+        self.plot_custom_signed_bars()
+        self.plot_custom_radar()
+        self.plot_envelope_objective_influence()
+        self.plot_envelope_per_objective()
+        self.plot_rank_correlation()
+        self.plot_importance_divergence()
+        self.plot_dashboard_summary()
+        if raw_data:
+            self.plot_beeswarm(raw_data)
         print(f"\n✓ All plots saved to: {self.out_dir}/")
 
 
@@ -572,6 +654,11 @@ if __name__ == "__main__":
         help="Comma-separated plot numbers to run, or 'all' "
              "(choices: 4,5,6,7,8,9,11). Default: all"
     )
+    parser.add_argument(
+        "--raw_data", default=None,
+        help="Original combined CSV (same as --input to shap_env_explain.py). "
+             "Required only for plot 12 (beeswarm)."
+    )
     args = parser.parse_args()
 
     args.top_k = min(args.top_k, len(FEATURE_COLS))
@@ -579,7 +666,7 @@ if __name__ == "__main__":
     viz = SHAPVisualizerEnv(args.data_root, args.out_dir, args.top_k)
 
     if args.plot == "all":
-        viz.run_all()
+        viz.run_all(raw_data=args.raw_data)
     else:
         plot_map = {
             "4":  viz.plot_custom_signed_bars,
@@ -589,6 +676,8 @@ if __name__ == "__main__":
             "8":  viz.plot_rank_correlation,
             "9":  viz.plot_importance_divergence,
             "11": viz.plot_dashboard_summary,
+            "12": lambda: viz.plot_beeswarm(args.raw_data) if args.raw_data
+                          else print("[SKIP] plot 12 needs --raw_data"),
         }
         for num in args.plot.split(","):
             num = num.strip()

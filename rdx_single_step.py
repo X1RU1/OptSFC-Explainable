@@ -2,22 +2,29 @@
 Single-Step RDX Analysis
 ────────────────────────
 Comprehensive single-step explanation for both single-objective RL and
-multi-objective RL (MORL) algorithms, including:
+multi-objective RL (MORL) algorithms.
 
-  Value-based (MORL)        : Envelope  (per-objective Q)
-  Value-based (single-obj)  : DQN       (scalar Q)
-  Policy-based (MORL)       : EUPG
-  Policy-based (single-obj) : PPO, A2C
+Algorithm categories (architecture reference only — NOT the basis for
+plot routing below):
+  Value-based (single-obj)  : DQN        (scalar Q)
+  Value-based (MORL)        : Envelope   (per-objective Q-vectors)
+  Policy-based (single-obj) : PPO, A2C   (action probabilities only)
+  Policy-based (MORL)       : EUPG       (accrued-reward-conditioned policy)
 
 Plot routing per algorithm
 ──────────────────────────
-  Envelope / EUPG  →  q_landscape, q_diff, state_context, pairwise_rdx
-  DQN              →  state_context
-  PPO / A2C        →  state_context
+Routing is based on single-objective vs. MORL, NOT on value-based vs.
+policy-based. EUPG (policy-based) is grouped with Envelope (value-based)
+here because both are MORL and log per-objective weighted-Q-diff columns;
+PPO/A2C (also policy-based) are grouped with DQN because all three are
+single-objective and only log a scalar signal (or none).
+
+  Envelope, EUPG (MORL)          →  q_landscape, q_diff, pairwise_rdx, state_context
+  DQN, PPO, A2C (single-obj)     →  state_context only
 
 Usage
 ─────
-  python morl_single_step.py \
+  python rdx_single_step.py \
       --envelope envelope_explain.csv \
       --eupg     eupg_explain.csv    \
       --dqn      dqn_explain.csv     \

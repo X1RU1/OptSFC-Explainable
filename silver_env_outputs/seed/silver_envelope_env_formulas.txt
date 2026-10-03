@@ -1,0 +1,100 @@
+Feature mapping: {0: 'feat_mean_mtd_overhead', 1: 'feat_mean_network_penalty', 2: 'feat_max_network_penalty', 3: 'feat_mean_security_penalty', 4: 'feat_max_security_penalty'}
+
+=== Discretization Scheme ===
+Discretization scheme: 3-bin quantile  (low / medium / high)
+
+  feat_mean_mtd_overhead:
+    (-inf, 0.0820]  →  low  (bin 0)
+    (0.0820, 0.0820]  →  medium  (bin 1)
+    (0.0820, +inf]  →  high  (bin 2)
+  feat_mean_network_penalty:
+    (-inf, 0.0033]  →  low  (bin 0)
+    (0.0033, 0.0034]  →  medium  (bin 1)
+    (0.0034, +inf]  →  high  (bin 2)
+  feat_max_network_penalty:
+    (-inf, 0.0037]  →  low  (bin 0)
+    (0.0037, 0.0039]  →  medium  (bin 1)
+    (0.0039, +inf]  →  high  (bin 2)
+  feat_mean_security_penalty:
+    (-inf, 2.8600]  →  low  (bin 0)
+    (2.8600, 2.9289]  →  medium  (bin 1)
+    (2.9289, +inf]  →  high  (bin 2)
+  feat_max_security_penalty:
+    (-inf, 4.6914]  →  low  (bin 0)
+    (4.6914, 4.8594]  →  medium  (bin 1)
+    (4.8594, +inf]  →  high  (bin 2)
+
+=== Decision Tree (thresholds shown as real feature values) ===
+|--- feat_max_security_penalty <= 4.6914
+|   |--- feat_mean_network_penalty <= 0.0034
+|   |   |--- class: 1
+|   |--- feat_mean_network_penalty >  0.0034
+|   |   |--- feat_mean_security_penalty <= 2.8600
+|   |   |   |--- class: 0
+|   |   |--- feat_mean_security_penalty >  2.8600
+|   |   |   |--- class: 0
+|--- feat_max_security_penalty >  4.6914
+|   |--- feat_mean_security_penalty <= 2.8600
+|   |   |--- class: 6
+|   |--- feat_mean_security_penalty >  2.8600
+|   |   |--- feat_mean_security_penalty <= 2.9289
+|   |   |   |--- feat_max_security_penalty <= 4.8594
+|   |   |   |   |--- class: 0
+|   |   |   |--- feat_max_security_penalty >  4.8594
+|   |   |   |   |--- feat_max_network_penalty <= 0.0039
+|   |   |   |   |   |--- class: 0
+|   |   |   |   |--- feat_max_network_penalty >  0.0039
+|   |   |   |   |   |--- class: 1
+|   |   |--- feat_mean_security_penalty >  2.9289
+|   |   |   |--- feat_max_security_penalty <= 4.8594
+|   |   |   |   |--- class: 0
+|   |   |   |--- feat_max_security_penalty >  4.8594
+|   |   |   |   |--- class: 0
+
+
+=== Linear Regression (trained on discretized features) ===
+f(x) = 4.9068e+00 - 3.7009e-01·x2 - 3.7009e-01·x3 - 7.8675e-01·x4 - 6.8333e-01·x5
+Round+clip training accuracy on boundary points: 30.30% (20/66 correct)
+
+=== Logistic Regression (trained on discretized features) ===
+f_0(x) = 1.1343e+00 + 0.0000e+00*x1 + 2.4725e-02*x2 + 2.4725e-02*x3 + 1.0306e+00*x4 + 4.7940e-01*x5
+f_1(x) = 1.8508e+00 + 0.0000e+00*x1 - 3.9875e-01*x2 - 3.9875e-01*x3 - 2.2061e-01*x4 + 5.0758e-01*x5
+f_2(x) = -3.1533e-01 + 0.0000e+00*x1 + 1.8341e-01*x2 + 1.8341e-01*x3 + 2.7585e-01*x4 - 4.5218e-01*x5
+f_3(x) = 2.4360e-01 + 0.0000e+00*x1 + 1.1830e-01*x2 + 1.1830e-01*x3 - 6.8723e-01*x4 - 5.7764e-01*x5
+f_4(x) = -5.9151e-02 + 0.0000e+00*x1 + 1.5049e-01*x2 + 1.5049e-01*x3 - 2.8735e-01*x4 - 1.9913e-01*x5
+f_5(x) = -1.0678e-02 + 0.0000e+00*x1 + 1.0256e-01*x2 + 1.0256e-01*x3 - 5.9309e-01*x4 - 5.0600e-01*x5
+f_6(x) = -2.1620e-01 + 0.0000e+00*x1 + 1.9422e-01*x2 + 1.9422e-01*x3 - 3.7939e-01*x4 + 4.1205e-01*x5
+f_7(x) = -2.5754e+00 + 0.0000e+00*x1 + 6.8385e-02*x2 + 6.8385e-02*x3 + 7.9126e-01*x4 + 7.2870e-01*x5
+f_8(x) = -1.1438e+00 + 0.0000e+00*x1 + 1.6707e-01*x2 + 1.6707e-01*x3 + 4.4686e-01*x4 + 3.8670e-01*x5
+f_10(x) = -1.0205e+00 + 0.0000e+00*x1 + 4.9323e-02*x2 + 4.9323e-02*x3 - 3.0604e-01*x4 - 2.7473e-01*x5
+f_11(x) = 2.1123e+00 + 0.0000e+00*x1 - 6.5973e-01*x2 - 6.5973e-01*x3 - 7.0853e-02*x4 - 5.0475e-01*x5
+
+=== Surrogate Model Accuracy (training set, boundary points) ===
+Decision Tree:        57.58% (38/66)
+Actions present: 11/12
+Tree leaves: 9, depth: 5
+Action distribution (action: count): {0: 34, 1: 5, 2: 4, 3: 4, 4: 4, 5: 3, 6: 5, 7: 1, 8: 3, 9: 0, 10: 1, 11: 2}
+
+=== Full-Trajectory Fidelity ===
+The decision tree above was trained on 66 boundary points only. Evaluated against all 100000 states in this algorithm's full trajectory, using the same bin_edges and the same discretize() call APG relies on:
+Full-trajectory fidelity: 42.86% (42859/100000)
+Per-action breakdown (executed action: count, correct, rate):
+  action 0: count=53043, correct=41849, rate=78.90%
+  action 1: count=2330, correct=546, rate=23.43%
+  action 2: count=4743, correct=0, rate=0.00%
+  action 3: count=6158, correct=0, rate=0.00%
+  action 4: count=5168, correct=0, rate=0.00%
+  action 5: count=5399, correct=0, rate=0.00%
+  action 6: count=7479, correct=464, rate=6.20%
+  action 7: count=2521, correct=0, rate=0.00%
+  action 8: count=4814, correct=0, rate=0.00%
+  action 9: count=4228, correct=0, rate=0.00%
+  action 10: count=1702, correct=0, rate=0.00%
+  action 11: count=2415, correct=0, rate=0.00%
+Logistic Regression:  51.52% (34/66)
+Linear Regression:    30.30% (20/66)
+
+Upper bound given this feature set (majority vote per unique discretized combination): 57.58% (38/66)
+The decision tree already reaches this ceiling, so it is not underfitting: no classifier using only these discretized features could do better on this boundary dataset.
+Distinct discretized feature combinations: 10
+Combinations mapping to more than one action: 6 (62/66 points affected)

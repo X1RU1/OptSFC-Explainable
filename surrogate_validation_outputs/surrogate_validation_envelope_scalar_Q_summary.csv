@@ -1,0 +1,2 @@
+tag,n_states,n_background,self_match_rate,argmax_agreement_overall,argmax_agreement_non_background,mean_abs_error_overall,mean_abs_error_non_background,rmse_overall,rmse_non_background
+envelope_scalar_Q,100000,100,0.02434,0.20444,0.20057192054609188,162.57690696293997,166.25435826249594,256.47664207848015,259.6344333614356

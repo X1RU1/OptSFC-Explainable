@@ -716,7 +716,7 @@ def eval_envelope(model_name, seed, eval_steps=5000, budget_reset="episodic"):
     save_root = f"./trained_models/{model_name}_seed{seed}/"
 
     env = _make_eval_env(budget_reset, eval_seed, non_MORL=False)
-    agent = Envelope(env, log=False)
+    agent = Envelope(env, log=False, seed=eval_seed)           
     agent.load(path=save_root + "policy.tar", load_replay_buffer=False)
     agent.experiment_name = "Envelope"
 
@@ -740,7 +740,8 @@ def eval_eupg(model_name, seed, eval_steps=5000, budget_reset="episodic"):
 
     env = _make_eval_env(budget_reset, eval_seed, non_MORL=False)
     weights = np.array(rewards_coeff)
-    agent = EUPG(env, scalarization=scalarization, weights=weights, log=False)
+    agent = EUPG(env, scalarization=scalarization, weights=weights,
+                 log=False, seed=eval_seed)                  
     eupg_model_load(path=save_root + "policy.tar", model=agent)
 
     obs_dim = env.observation_space.shape[0]

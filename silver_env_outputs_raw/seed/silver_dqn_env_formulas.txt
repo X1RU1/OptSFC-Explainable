@@ -1,0 +1,145 @@
+Feature mapping: {0: 'feat_max_apt_score', 1: 'feat_mean_apt_score', 2: 'feat_max_dataleak_score', 3: 'feat_mean_dataleak_score', 4: 'feat_max_dos_score', 5: 'feat_mean_dos_score', 6: 'feat_vim0_cpu', 7: 'feat_vim0_ram', 8: 'feat_vim1_cpu', 9: 'feat_vim1_ram', 10: 'feat_mean_remaining_mig', 11: 'feat_mean_remaining_reinst', 12: 'feat_total_ues'}
+
+=== Discretization Scheme ===
+Discretization scheme: 3-bin quantile  (low / medium / high)
+
+  feat_max_apt_score:
+    (-inf, 5.5000]  →  low  (bin 0)
+    (5.5000, 5.5000]  →  medium  (bin 1)
+    (5.5000, +inf]  →  high  (bin 2)
+  feat_mean_apt_score:
+    (-inf, 1.5714]  →  low  (bin 0)
+    (1.5714, 1.5714]  →  medium  (bin 1)
+    (1.5714, +inf]  →  high  (bin 2)
+  feat_max_dataleak_score:
+    (-inf, 6.9570]  →  low  (bin 0)
+    (6.9570, 6.9570]  →  medium  (bin 1)
+    (6.9570, +inf]  →  high  (bin 2)
+  feat_mean_dataleak_score:
+    (-inf, 3.2444]  →  low  (bin 0)
+    (3.2444, 3.2444]  →  medium  (bin 1)
+    (3.2444, +inf]  →  high  (bin 2)
+  feat_max_dos_score:
+    (-inf, 7.5000]  →  low  (bin 0)
+    (7.5000, 7.5000]  →  medium  (bin 1)
+    (7.5000, +inf]  →  high  (bin 2)
+  feat_mean_dos_score:
+    (-inf, 1.0714]  →  low  (bin 0)
+    (1.0714, 1.0714]  →  medium  (bin 1)
+    (1.0714, +inf]  →  high  (bin 2)
+  feat_vim0_cpu:
+    (-inf, 18.0000]  →  low  (bin 0)
+    (18.0000, 22.0000]  →  medium  (bin 1)
+    (22.0000, +inf]  →  high  (bin 2)
+  feat_vim0_ram:
+    (-inf, 184.5000]  →  low  (bin 0)
+    (184.5000, 188.5000]  →  medium  (bin 1)
+    (188.5000, +inf]  →  high  (bin 2)
+  feat_vim1_cpu:
+    (-inf, 20.0000]  →  low  (bin 0)
+    (20.0000, 22.0000]  →  medium  (bin 1)
+    (22.0000, +inf]  →  high  (bin 2)
+  feat_vim1_ram:
+    (-inf, 100.1875]  →  low  (bin 0)
+    (100.1875, 106.3125]  →  medium  (bin 1)
+    (106.3125, +inf]  →  high  (bin 2)
+  feat_mean_remaining_mig:
+    (-inf, 2.8571]  →  low  (bin 0)
+    (2.8571, 5.2857]  →  medium  (bin 1)
+    (5.2857, +inf]  →  high  (bin 2)
+  feat_mean_remaining_reinst:
+    (-inf, 1.4286]  →  low  (bin 0)
+    (1.4286, 8.5714]  →  medium  (bin 1)
+    (8.5714, +inf]  →  high  (bin 2)
+  feat_total_ues:
+    (-inf, 0.0000]  →  low  (bin 0)
+    (0.0000, 0.0000]  →  medium  (bin 1)
+    (0.0000, +inf]  →  high  (bin 2)
+
+=== Decision Tree (thresholds shown as real feature values) ===
+|--- feat_mean_remaining_reinst <= 8.5714
+|   |--- feat_mean_remaining_reinst <= 1.4286
+|   |   |--- class: 0
+|   |--- feat_mean_remaining_reinst >  1.4286
+|   |   |--- class: 9
+|--- feat_mean_remaining_reinst >  8.5714
+|   |--- feat_mean_remaining_mig <= 2.8571
+|   |   |--- feat_vim1_ram <= 106.3125
+|   |   |   |--- feat_vim0_cpu <= 22.0000
+|   |   |   |   |--- feat_vim1_cpu <= 20.0000
+|   |   |   |   |   |--- class: 0
+|   |   |   |   |--- feat_vim1_cpu >  20.0000
+|   |   |   |   |   |--- class: 0
+|   |   |   |--- feat_vim0_cpu >  22.0000
+|   |   |   |   |--- feat_total_ues <= 0.0000
+|   |   |   |   |   |--- class: 0
+|   |   |   |   |--- feat_total_ues >  0.0000
+|   |   |   |   |   |--- class: 0
+|   |   |--- feat_vim1_ram >  106.3125
+|   |   |   |--- class: 3
+|   |--- feat_mean_remaining_mig >  2.8571
+|   |   |--- feat_mean_remaining_mig <= 5.2857
+|   |   |   |--- feat_vim0_cpu <= 18.0000
+|   |   |   |   |--- class: 0
+|   |   |   |--- feat_vim0_cpu >  18.0000
+|   |   |   |   |--- feat_vim1_cpu <= 20.0000
+|   |   |   |   |   |--- feat_vim0_cpu <= 22.0000
+|   |   |   |   |   |   |--- class: 6
+|   |   |   |   |   |--- feat_vim0_cpu >  22.0000
+|   |   |   |   |   |   |--- class: 8
+|   |   |   |   |--- feat_vim1_cpu >  20.0000
+|   |   |   |   |   |--- class: 8
+|   |   |--- feat_mean_remaining_mig >  5.2857
+|   |   |   |--- feat_vim0_cpu <= 22.0000
+|   |   |   |   |--- class: 9
+|   |   |   |--- feat_vim0_cpu >  22.0000
+|   |   |   |   |--- class: 0
+
+
+=== Linear Regression (trained on discretized features) ===
+f(x) = -4.0065e+00 - 2.2204e-16·x3 - 4.4409e-16·x4 - 2.2204e-16·x5 + 4.4409e-16·x6 + 1.3105e+00·x7 + 1.3105e+00·x8 + 1.1761e+00·x9 + 1.2249e+00·x10 + 8.4583e-01·x11 - 2.1765e-01·x12 + 2.0171e+00·x13
+Round+clip training accuracy on boundary points: 9.09% (6/66 correct)
+
+=== Logistic Regression (trained on discretized features) ===
+f_0(x) = 4.3730e+00 + 0.0000e+00*x1 + 0.0000e+00*x2 + 0.0000e+00*x3 + 0.0000e+00*x4 + 0.0000e+00*x5 + 0.0000e+00*x6 - 4.4406e-01*x7 - 4.4406e-01*x8 - 1.2946e-01*x9 - 3.0724e-01*x10 + 1.2007e-01*x11 + 9.5913e-02*x12 - 7.3807e-01*x13
+f_1(x) = -9.3550e-02 + 0.0000e+00*x1 + 0.0000e+00*x2 + 0.0000e+00*x3 + 0.0000e+00*x4 + 0.0000e+00*x5 + 0.0000e+00*x6 + 2.2784e-01*x7 + 2.2784e-01*x8 - 1.2757e-01*x9 - 2.3757e-01*x10 - 2.8172e-01*x11 + 3.2794e-01*x12 - 5.8617e-01*x13
+f_2(x) = -5.8999e-01 + 0.0000e+00*x1 + 0.0000e+00*x2 + 0.0000e+00*x3 + 0.0000e+00*x4 + 0.0000e+00*x5 + 0.0000e+00*x6 + 5.7955e-02*x7 + 5.7955e-02*x8 - 3.9253e-02*x9 - 6.7293e-02*x10 - 6.7322e-02*x11 - 7.0616e-01*x12 + 4.8347e-02*x13
+f_3(x) = -1.0119e+00 + 0.0000e+00*x1 + 0.0000e+00*x2 + 0.0000e+00*x3 + 0.0000e+00*x4 + 0.0000e+00*x5 + 0.0000e+00*x6 + 1.9583e-01*x7 + 1.9583e-01*x8 + 1.8281e-01*x9 + 5.8818e-01*x10 - 5.4691e-01*x11 + 9.1580e-01*x12 - 3.9468e-01*x13
+f_4(x) = 4.0704e-01 + 0.0000e+00*x1 + 0.0000e+00*x2 + 0.0000e+00*x3 + 0.0000e+00*x4 + 0.0000e+00*x5 + 0.0000e+00*x6 - 1.4618e-01*x7 - 1.4618e-01*x8 + 4.0740e-01*x9 + 9.7847e-02*x10 - 4.3188e-01*x11 - 1.0806e-01*x12 + 2.2405e-01*x13
+f_5(x) = 5.1318e-02 + 0.0000e+00*x1 + 0.0000e+00*x2 + 0.0000e+00*x3 + 0.0000e+00*x4 + 0.0000e+00*x5 + 0.0000e+00*x6 + 7.9272e-02*x7 + 7.9272e-02*x8 - 4.6400e-02*x9 - 8.0194e-02*x10 - 8.2223e-02*x11 - 9.6569e-01*x12 + 7.0051e-02*x13
+f_6(x) = 7.8208e-01 + 0.0000e+00*x1 + 0.0000e+00*x2 + 0.0000e+00*x3 + 0.0000e+00*x4 + 0.0000e+00*x5 + 0.0000e+00*x6 - 2.6133e-01*x7 - 2.6133e-01*x8 - 4.2377e-01*x9 + 2.7740e-01*x10 + 3.2646e-01*x11 - 2.2903e-01*x12 + 1.6666e-01*x13
+f_7(x) = -2.4509e+00 + 0.0000e+00*x1 + 0.0000e+00*x2 + 0.0000e+00*x3 + 0.0000e+00*x4 + 0.0000e+00*x5 + 0.0000e+00*x6 + 3.0648e-01*x7 + 3.0648e-01*x8 - 1.8914e-01*x9 - 3.2606e-01*x10 + 5.8778e-01*x11 + 5.8763e-01*x12 + 2.9121e-01*x13
+f_8(x) = -6.1616e-02 + 0.0000e+00*x1 + 0.0000e+00*x2 + 0.0000e+00*x3 + 0.0000e+00*x4 + 0.0000e+00*x5 + 0.0000e+00*x6 - 2.7794e-01*x7 - 2.7794e-01*x8 + 4.4175e-02*x9 + 3.4062e-01*x10 + 5.2086e-01*x11 + 4.3860e-01*x12 + 2.4481e-01*x13
+f_9(x) = -2.3290e-02 + 0.0000e+00*x1 + 0.0000e+00*x2 + 0.0000e+00*x3 + 0.0000e+00*x4 + 0.0000e+00*x5 + 0.0000e+00*x6 - 1.3691e-01*x7 - 1.3691e-01*x8 + 5.5444e-01*x9 + 1.4387e-01*x10 + 3.5063e-01*x11 + 1.0174e-01*x12 + 2.2789e-01*x13
+f_10(x) = -5.7436e-01 + 0.0000e+00*x1 + 0.0000e+00*x2 + 0.0000e+00*x3 + 0.0000e+00*x4 + 0.0000e+00*x5 + 0.0000e+00*x6 + 2.0112e-01*x7 + 2.0112e-01*x8 - 1.1680e-01*x9 - 2.1520e-01*x10 - 2.4881e-01*x11 - 2.8952e-01*x12 + 2.2477e-01*x13
+f_11(x) = -8.0784e-01 + 0.0000e+00*x1 + 0.0000e+00*x2 + 0.0000e+00*x3 + 0.0000e+00*x4 + 0.0000e+00*x5 + 0.0000e+00*x6 + 1.9792e-01*x7 + 1.9792e-01*x8 - 1.1643e-01*x9 - 2.1436e-01*x10 - 2.4694e-01*x11 - 1.6915e-01*x12 + 2.2112e-01*x13
+
+=== Surrogate Model Accuracy (training set, boundary points) ===
+Decision Tree:        37.88% (25/66)
+Actions present: 12/12
+Tree leaves: 13, depth: 6
+Action distribution (action: count): {0: 17, 1: 4, 2: 2, 3: 5, 4: 5, 5: 4, 6: 4, 7: 4, 8: 5, 9: 5, 10: 6, 11: 5}
+
+=== Full-Trajectory Fidelity ===
+The decision tree above was trained on 66 boundary points only. Evaluated against all 100000 states in this algorithm's full trajectory, using the same bin_edges and the same discretize() call APG relies on:
+Full-trajectory fidelity: 37.66% (37663/100000)
+Per-action breakdown (executed action: count, correct, rate):
+  action 0: count=76011, correct=37226, rate=48.97%
+  action 1: count=1124, correct=0, rate=0.00%
+  action 2: count=3029, correct=0, rate=0.00%
+  action 3: count=1284, correct=32, rate=2.49%
+  action 4: count=4344, correct=0, rate=0.00%
+  action 5: count=993, correct=0, rate=0.00%
+  action 6: count=4199, correct=46, rate=1.10%
+  action 7: count=1373, correct=0, rate=0.00%
+  action 8: count=4743, correct=96, rate=2.02%
+  action 9: count=828, correct=263, rate=31.76%
+  action 10: count=1168, correct=0, rate=0.00%
+  action 11: count=904, correct=0, rate=0.00%
+Logistic Regression:  27.27% (18/66)
+Linear Regression:    9.09% (6/66)
+
+Upper bound given this feature set (majority vote per unique discretized combination): 37.88% (25/66)
+The decision tree already reaches this ceiling, so it is not underfitting: no classifier using only these discretized features could do better on this boundary dataset.
+Distinct discretized feature combinations: 13
+Combinations mapping to more than one action: 7 (59/66 points affected)

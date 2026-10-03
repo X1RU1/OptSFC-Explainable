@@ -1,0 +1,2 @@
+tag,n_states,n_background,self_match_rate,argmax_agreement_overall,argmax_agreement_non_background,mean_abs_error_overall,mean_abs_error_non_background,rmse_overall,rmse_non_background
+eupg_policy_prob,100000,100,0.0025,0.93751,0.9373934837092732,0.0012506096083333327,0.0012530735864661655,0.0034691461666133826,0.00347263857670916

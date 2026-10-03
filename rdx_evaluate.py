@@ -38,7 +38,7 @@ Usage:
   1. Edit CSV_FILES dict below.
   2. (Optional) set SINGLE_STEP_OVERRIDE to pin a specific "step" column value
      for Envelope and/or EUPG; set to None to use auto-selection.
-  3. Run:  python evaluate_all_algorithms.py
+  3. Run:  python rdx_evaluate.py
 
 Outputs:
   - Per-algorithm plots  (PDF in OUTPUT_DIR)
@@ -56,11 +56,11 @@ from matplotlib.lines import Line2D
 # ── 0. CONFIGURATION ──────────────────────────────────────────────────────────
 
 CSV_FILES = {
-    "A2C":      "a2c_explain.csv",
-    "DQN":      "dqn_explain.csv",
-    "Envelope": "envelope_explain.csv",
-    "EUPG":     "eupg_explain.csv",
-    "PPO":      "ppo_explain.csv",
+    "A2C":      "trained_models/a2c_model_seed4/train_explain.csv",
+    "DQN":      "trained_models/dqn_model_seed0/train_explain.csv",
+    "Envelope": "trained_models/envelope_model_seed3/train_explain.csv",
+    "EUPG":     "trained_models/eupg_model_seed2/train_explain.csv",
+    "PPO":      "trained_models/ppo_model_seed0/train_explain.csv",
 }
 
 # ── Single-Step RDX override (MORL algorithms only) ──────────────────────────
@@ -82,7 +82,7 @@ ALGO_COLORS = {
     "EUPG":     "#984ea3",
     "PPO":      "#ff7f00",
 }
-OUTPUT_DIR  = "rdx_evaluation_plots"
+OUTPUT_DIR  = "rdx_evaluation_plots/seed"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 WINDOW_FRAC = 0.02   # rolling window as fraction of total steps

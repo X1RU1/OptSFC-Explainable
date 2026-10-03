@@ -138,9 +138,8 @@ ENVELOPE_OBJECTIVES  = ["resource", "network", "security"]
 # Envelope reward weights [resource, network, security]
 REWARDS_COEFF = [0.4, 0.3, 0.3]
 
-# KernelExplainer background sample size (1% of data, mirrors paper's DeepExplainer)
-BACKGROUND_RATIO = 0.01
-BACKGROUND_MIN   = 50
+# KernelExplainer background sample size (0.1% of data, mirrors paper's DeepExplainer)
+BACKGROUND_SIZE = 100
 
 # ---------------------------------------------------------------------------
 # Data helpers
@@ -158,13 +157,29 @@ def _get_features(df: pd.DataFrame) -> np.ndarray:
 
 
 def _background(X: np.ndarray):
-    """Select background dataset (1% of data, min BACKGROUND_MIN rows).
-    Returns (background_X, background_indices) so callers can look up
-    the corresponding rows in other aligned arrays (e.g. action_matrix).
+    """Select background via kmeans centroids snapped to nearest real rows.
+
+    shap.kmeans() produces centroids that are NOT real data points, so they
+    cannot be used to look up action_matrix rows (policy_fn depends on
+    real Y_ref values via nearest-neighbour lookup). This function finds
+    the closest real row in X for each centroid instead, preserving valid
+    bg_idx while keeping better coverage of the feature-space distribution
+    than pure random sampling.
     """
-    n = max(BACKGROUND_MIN, int(len(X) * BACKGROUND_RATIO))
-    n = min(n, len(X))
-    idx = np.random.default_rng(42).choice(len(X), size=n, replace=False)
+    n = min(BACKGROUND_SIZE, len(X))
+
+    feat_mean = X.mean(axis=0)
+    feat_std  = X.std(axis=0)
+    feat_std[feat_std == 0] = 1.0
+    X_scaled = (X - feat_mean) / feat_std
+
+    kmeans_summary = shap.kmeans(X_scaled, n)
+    centroids = kmeans_summary.data  # (n, n_features), already scaled
+
+    dists  = cdist(centroids, X_scaled, metric="sqeuclidean")
+    idx    = np.argmin(dists, axis=1)
+    idx    = np.unique(idx)  # snap collisions may reduce count below n
+
     return X[idx], idx
 
 

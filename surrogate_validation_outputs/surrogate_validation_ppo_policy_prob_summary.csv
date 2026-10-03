@@ -1,0 +1,2 @@
+tag,n_states,n_background,self_match_rate,argmax_agreement_overall,argmax_agreement_non_background,mean_abs_error_overall,mean_abs_error_non_background,rmse_overall,rmse_non_background
+ppo_policy_prob,100352,100,0.004892777423469388,0.9205197704081632,0.9201890627972882,0.021578410260881697,0.02168183658451915,0.06062305681454367,0.06077146395453097

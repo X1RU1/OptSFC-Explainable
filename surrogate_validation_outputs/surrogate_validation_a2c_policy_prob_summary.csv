@@ -1,0 +1,2 @@
+tag,n_states,n_background,self_match_rate,argmax_agreement_overall,argmax_agreement_non_background,mean_abs_error_overall,mean_abs_error_non_background,rmse_overall,rmse_non_background
+a2c_policy_prob,100000,100,0.00542,0.34743,0.34472842808019466,0.05771508359000001,0.05794422820604343,0.10497677516069426,0.1051811862394605

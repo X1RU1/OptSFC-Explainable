@@ -1,0 +1,6 @@
+Algorithm,Total Steps,Match Rate (%),Adv Steps,Regret Steps,Highlight Step,Adv Mean Q-Δ,Regret Mean Q-Δ,Adv Mean W-ResourceΔ,Regret Mean W-ResourceΔ,Highlight W-ResourceΔ,Adv Mean W-NetworkΔ,Regret Mean W-NetworkΔ,Highlight W-NetworkΔ,Adv Mean W-SecurityΔ,Regret Mean W-SecurityΔ,Highlight W-SecurityΔ
+A2C,100000,39.0,39013,60987,—,2.4843,-1.7394,,,,,,,,,
+DQN,100000,91.1,91073,8927,—,4.4059,-10.3615,,,,,,,,,
+Envelope,100000,90.5,90540,9460,96,,,2.6452,0.0132,-31.6024,1.9886,-0.1153,39.4600,1.5868,-2.6746,21.9302
+EUPG,100000,3.2,3178,96822,123,,,-2.7650,0.0377,-1.3489,-1.9981,0.0218,-19.3845,-2.1220,-0.0108,-14.2450
+PPO,100352,60.8,61038,39314,—,1.6878,-3.4261,,,,,,,,,
